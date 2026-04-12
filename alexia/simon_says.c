@@ -3,6 +3,7 @@
 #include "hardware/gpio.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 // ─── Internal state ──────────────────────────────────────────────────────────
 
@@ -122,6 +123,95 @@ static int poll_buttons(void) {
         }
     }
     return -1;
+}
+
+// ─── Startup animation ───────────────────────────────────────────────────────
+// Chase RED→GREEN→BLUE→YELLOW two times, then burst all on/off three times.
+
+void simon_says_startup_animation(void) {
+    // Two full chase cycles
+    for (int cycle = 0; cycle < 2; cycle++) {
+        for (int i = 0; i < 4; i++) {
+            leds_all_off();
+            gpio_put(LED_PINS[i], 1);
+            sleep_ms(120);
+        }
+    }
+    // Reverse chase so it feels like a bounce back
+    for (int i = 2; i >= 0; i--) {
+        leds_all_off();
+        gpio_put(LED_PINS[i], 1);
+        sleep_ms(120);
+    }
+    leds_all_off();
+    sleep_ms(80);
+
+    // Final burst — all on/off three times
+    flash_all_leds(150, 3);
+    sleep_ms(200);
+}
+
+// ─── Hardware self-test ──────────────────────────────────────────────────────
+// For each of the 4 colors, lights the LED and waits up to 5 s for the
+// matching button press. Prints result over USB serial. Returns true if all
+// four pairs pass.
+
+static const char *COLOR_NAMES[4] = {"RED", "GREEN", "BLUE", "YELLOW"};
+#define SELFTEST_TIMEOUT_MS 5000
+
+bool simon_says_selftest(void) {
+    printf("\n=== Simon Says Self-Test ===\n");
+    printf("Press each button when its LED lights up.\n\n");
+
+    bool all_pass = true;
+
+    for (int i = 0; i < 4; i++) {
+        leds_all_off();
+        gpio_put(LED_PINS[i], 1);
+        printf("[%s] LED on — waiting for button... ", COLOR_NAMES[i]);
+
+        uint32_t start = to_ms_since_boot(get_absolute_time());
+        bool passed = false;
+
+        while (to_ms_since_boot(get_absolute_time()) - start < SELFTEST_TIMEOUT_MS) {
+            // Correct button
+            if (!gpio_get(BTN_PINS[i])) {
+                sleep_ms(DEBOUNCE_MS);   // debounce
+                passed = true;
+                break;
+            }
+            // Any wrong button pressed — fail immediately
+            for (int j = 0; j < 4; j++) {
+                if (j != i && !gpio_get(BTN_PINS[j])) {
+                    sleep_ms(DEBOUNCE_MS);
+                    printf("FAIL (wrong button pressed)\n");
+                    all_pass = false;
+                    goto next_led;
+                }
+            }
+        }
+
+        if (passed) {
+            printf("PASS\n");
+            // Blink the LED twice as visual confirmation
+            gpio_put(LED_PINS[i], 0); sleep_ms(100);
+            gpio_put(LED_PINS[i], 1); sleep_ms(100);
+            gpio_put(LED_PINS[i], 0); sleep_ms(100);
+            gpio_put(LED_PINS[i], 1); sleep_ms(100);
+            gpio_put(LED_PINS[i], 0);
+        } else {
+            printf("FAIL (timeout)\n");
+            all_pass = false;
+        }
+
+        next_led:
+        sleep_ms(300);
+    }
+
+    leds_all_off();
+    printf("\nSelf-test %s\n", all_pass ? "PASSED" : "FAILED");
+    printf("===========================\n\n");
+    return all_pass;
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────

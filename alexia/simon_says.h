@@ -27,6 +27,14 @@
 // Call once at startup.
 void simon_says_init(void);
 
+// LED chase animation played at boot before the game arms.
+void simon_says_startup_animation(void);
+
+// Hardware self-test: flashes each LED in order and waits for the matching
+// button press. Prints PASS/FAIL for each pair over USB serial.
+// Returns true if all 4 pairs pass.
+bool simon_says_selftest(void);
+
 // Call repeatedly from the main loop.
 // Returns true when the module has just been solved (one-shot).
 bool simon_says_update(void);

@@ -74,6 +74,15 @@ int main(void) {
     simon_says_init();
     timer_module_init();   // also initialises UART0
 
+    // ── Startup sequence ──────────────────────────────────────────────────────
+    // 1. Play LED chase animation so the player knows the board is alive.
+    simon_says_startup_animation();
+
+    // 2. Run hardware self-test: verifies every LED/button pair is correctly
+    //    wired. Results print over USB serial. Board continues regardless so
+    //    the game still works even without a host connected.
+    simon_says_selftest();
+
     while (true) {
         // 1. Read any incoming UART messages from master
         poll_uart();
