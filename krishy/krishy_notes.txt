@@ -1,0 +1,15 @@
+Messages for team and Krishy: 
+
+Yeh I'll push all my local code as soon as I fix up all the bugs
+Servo I bought was broken so I reordered
+ML model still got some fine tuning I need to do
+Once those things r done I will push all code
+
+ - Estimated completion: Thursday 12:00 PM
+
+General Messages / To Do : 
+ - common.h needs to be modified because we have no need for UART
+   unless we use more than 1 MCU between modules. Lets use one... 
+   
+ - idk I lowk need to go over all other code on this repo but that 
+   I shall do after I finish my 337. 
