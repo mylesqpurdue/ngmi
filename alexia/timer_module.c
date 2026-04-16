@@ -1,5 +1,5 @@
 #include "timer_module.h"
-#include "tm1637.h"
+#include "seg7.h"
 #include "pico/stdlib.h"
 #include "hardware/uart.h"
 #include "hardware/gpio.h"
@@ -90,10 +90,8 @@ static void broadcast_time_if_needed(void) {
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 void timer_module_init(void) {
-    // TM1637 display
-    tm1637_init(TM1637_CLK_PIN, TM1637_DIO_PIN);
-    tm1637_set_brightness(5);
-    tm1637_clear();
+    // SPI 7-segment display
+    seg7_init();
 
     // UART0 for master communication
     uart_init(uart0, UART_BAUD_RATE);
@@ -121,7 +119,8 @@ void timer_reset(void) {
     s_remaining  = TIMER_DEFAULT_SECONDS;
     s_game_state = GAME_IDLE;
     s_colon_blink = false;
-    tm1637_clear();
+    seg7_clear();
+    seg7_refresh();
 }
 
 void timer_set_game_state(game_state_t state) {
@@ -150,40 +149,45 @@ void timer_update(void) {
 
     switch (s_game_state) {
         case GAME_IDLE:
-            // Show dashes: -- : --
-            // Reuse clear so the display is blank until the game arms.
-            tm1637_clear();
+            // Show dashes across all 8 digits until the game arms
+            seg7_show_dashes();
+            seg7_refresh();
             break;
 
         case GAME_ARMED:
-            // Show full start time, solid colon
-            tm1637_display_time(mins, secs, true);
+            // Show full start time, separator always on
+            seg7_display_time(mins, secs, true);
+            seg7_refresh();
             break;
 
         case GAME_ACTIVE:
-            // Count down; blink colon each second
-            tm1637_display_time(mins, secs, s_colon_blink);
+            // Count down; blink separator each second via s_colon_blink
+            seg7_display_time(mins, secs, s_colon_blink);
+            seg7_refresh();
             if (s_running) broadcast_time_if_needed();
             if (s_expired) {
                 // Notify master
                 uart_send("$SOLVED:TIMER_EXPIRED\n");
-                // Flash 00:00 rapidly to indicate explosion
+                // Flash 00.00 rapidly to indicate explosion
                 for (int i = 0; i < 6; i++) {
-                    tm1637_display_time(0, 0, true);  sleep_ms(150);
-                    tm1637_clear();                    sleep_ms(150);
+                    seg7_display_time(0, 0, true);  seg7_refresh(); sleep_ms(150);
+                    seg7_clear();                   seg7_refresh(); sleep_ms(150);
                 }
-                tm1637_display_time(0, 0, true);
+                seg7_display_time(0, 0, true);
+                seg7_refresh();
             }
             break;
 
         case GAME_DEFUSED:
-            // Freeze current display, colon on
-            tm1637_display_time(mins, secs, true);
+            // Freeze display at current time, separator on
+            seg7_display_time(mins, secs, true);
+            seg7_refresh();
             break;
 
         case GAME_EXPLODED:
-            // Show 00:00
-            tm1637_display_time(0, 0, true);
+            // Show 00.00
+            seg7_display_time(0, 0, true);
+            seg7_refresh();
             break;
     }
 }

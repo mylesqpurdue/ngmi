@@ -2,10 +2,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "../common/common.h"
+#include "seg7.h"
 
-// ─── Pin Assignments ─────────────────────────────────────────────────────────
-#define TM1637_CLK_PIN  14
-#define TM1637_DIO_PIN  15
+// Pin assignments are defined in seg7.h (SEG7_SCK_PIN, SEG7_TX_PIN, SEG7_CSN_PIN).
 
 // ─── Default countdown duration (seconds) ───────────────────────────────────
 #define TIMER_DEFAULT_SECONDS  300   // 5:00
