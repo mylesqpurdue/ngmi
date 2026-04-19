@@ -11,6 +11,6 @@ pico_sdk_init()
 
 # ─── Team module sub-projects ─────────────────────────────────────────────────
 add_subdirectory(alexia)
-# add_subdirectory(myles)   # FFT Wave + Sound — uncomment when added
+add_subdirectory(myles)   # FFT Wave + Sound
 # add_subdirectory(celine)  # Button + Wires   — uncomment when added
 # add_subdirectory(krish)   # Morse + Ring of Fire — uncomment when added
