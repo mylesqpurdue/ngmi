@@ -42,42 +42,95 @@ int main(void)
 
     simon_says_startup_animation();
 
-    cd_display1("Simon Says!     ");
-    cd_display2("Press to start  ");
+    int strikes = 0;
+    char strike_line[17];
 
-    // Wait for any button press — human timing seeds the random sequence
-    while (gpio_get(SS_BTN_RED) && gpio_get(SS_BTN_GREEN) &&
-           gpio_get(SS_BTN_BLUE) && gpio_get(SS_BTN_YELLOW)) sleep_ms(1);
-    while (!gpio_get(SS_BTN_RED) || !gpio_get(SS_BTN_GREEN) ||
-           !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) sleep_ms(10);
-    sleep_ms(300);
+    while (1) {
+        simon_says_reset();
 
-    // ── Round 1: Regular Simon Says ──────────────────────────────────────────
-    cd_display1("- Round 1 -     ");
-    cd_display2("Regular Round   ");
-    sleep_ms(2500);
+        cd_display1("Simon Says!     ");
+        snprintf(strike_line, sizeof(strike_line), "Strikes: %d      ", strikes);
+        cd_display2(strike_line);
 
-    cd_display1("Watch carefully!");
-    cd_display2("                ");
-    simon_says_demo(6);
+        // Wait for any button press — human timing seeds the random sequence
+        while (gpio_get(SS_BTN_RED) && gpio_get(SS_BTN_GREEN) &&
+               gpio_get(SS_BTN_BLUE) && gpio_get(SS_BTN_YELLOW)) sleep_ms(1);
+        while (!gpio_get(SS_BTN_RED) || !gpio_get(SS_BTN_GREEN) ||
+               !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) sleep_ms(10);
+        sleep_ms(300);
 
-    cd_display1("Your turn!      ");
-    cd_display2("Repeat sequence ");
-    if (simon_says_collect_input(6)) {
+        // ── Round 1: Regular Simon Says ──────────────────────────────────────
+        cd_display1("- Round 1 -     ");
+        cd_display2("Regular Round   ");
+        sleep_ms(2500);
+
+        cd_display1("Watch carefully!");
+        cd_display2("                ");
+        simon_says_demo(6);
+
+        cd_display1("Your turn!      ");
+        cd_display2("Repeat sequence ");
+        if (!simon_says_collect_input(6)) {
+            strikes++;
+            snprintf(strike_line, sizeof(strike_line), "Strikes: %d      ", strikes);
+            cd_display1("Wrong! Strike!  ");
+            cd_display2(strike_line);
+            for (int i = 0; i < 3; i++) {
+                gpio_put(SS_LED_RED, 1); gpio_put(SS_LED_GREEN, 1);
+                gpio_put(SS_LED_BLUE, 1); gpio_put(SS_LED_YELLOW, 1);
+                sleep_ms(200);
+                gpio_put(SS_LED_RED, 0); gpio_put(SS_LED_GREEN, 0);
+                gpio_put(SS_LED_BLUE, 0); gpio_put(SS_LED_YELLOW, 0);
+                sleep_ms(200);
+            }
+            sleep_ms(1500);
+            continue;
+        }
+
         cd_display1("Correct!        ");
         cd_display2("Round 1 cleared!");
-        gpio_put(SS_LED_RED,    1);
-        gpio_put(SS_LED_GREEN,  1);
-        gpio_put(SS_LED_BLUE,   1);
-        gpio_put(SS_LED_YELLOW, 1);
+        gpio_put(SS_LED_RED,    1); gpio_put(SS_LED_GREEN,  1);
+        gpio_put(SS_LED_BLUE,   1); gpio_put(SS_LED_YELLOW, 1);
         sleep_ms(2000);
-        gpio_put(SS_LED_RED,    0);
-        gpio_put(SS_LED_GREEN,  0);
-        gpio_put(SS_LED_BLUE,   0);
-        gpio_put(SS_LED_YELLOW, 0);
-    } else {
-        cd_display1("Wrong!          ");
-        cd_display2("Module failed!  ");
+        gpio_put(SS_LED_RED,    0); gpio_put(SS_LED_GREEN,  0);
+        gpio_put(SS_LED_BLUE,   0); gpio_put(SS_LED_YELLOW, 0);
+
+        // ── Transition to Round 2 ────────────────────────────────────────────
+        cd_display1("- Round 2 -     ");
+        cd_display2("Color Round     ");
+        sleep_ms(2000);
+        cd_display1("Use your manual!");
+        cd_display2("Press when ready");
+        while (gpio_get(SS_BTN_RED) && gpio_get(SS_BTN_GREEN) &&
+               gpio_get(SS_BTN_BLUE) && gpio_get(SS_BTN_YELLOW)) sleep_ms(1);
+        while (!gpio_get(SS_BTN_RED) || !gpio_get(SS_BTN_GREEN) ||
+               !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) sleep_ms(10);
+        sleep_ms(300);
+
+        // ── Round 2: Color Round (manual lookup) ─────────────────────────────
+        simon_says_generate(6);
+
+        static const char code_letters[] = "ABCD";
+        char code_line[17];
+        snprintf(code_line, sizeof(code_line), "Code: %c         ", code_letters[simon_says_get_code()]);
+        cd_display1(code_line);
+        cd_display2("Find your code! ");
+        sleep_ms(5000);
+
+        cd_display1(code_line);
+        cd_display2("Press mapped btn");
+        if (simon_says_color_round(6)) {
+            cd_display1("Correct!        ");
+            cd_display2("Module defused! ");
+            gpio_put(SS_LED_RED,    1); gpio_put(SS_LED_GREEN,  1);
+            gpio_put(SS_LED_BLUE,   1); gpio_put(SS_LED_YELLOW, 1);
+            for (;;);
+        }
+
+        strikes++;
+        snprintf(strike_line, sizeof(strike_line), "Strikes: %d      ", strikes);
+        cd_display1("Wrong! Strike!  ");
+        cd_display2(strike_line);
         for (int i = 0; i < 3; i++) {
             gpio_put(SS_LED_RED, 1); gpio_put(SS_LED_GREEN, 1);
             gpio_put(SS_LED_BLUE, 1); gpio_put(SS_LED_YELLOW, 1);
@@ -86,51 +139,7 @@ int main(void)
             gpio_put(SS_LED_BLUE, 0); gpio_put(SS_LED_YELLOW, 0);
             sleep_ms(200);
         }
-        for (;;);
-    }
-
-    // ── Transition to Round 2 ────────────────────────────────────────────────
-    cd_display1("- Round 2 -     ");
-    cd_display2("Color Round     ");
-    sleep_ms(2000);
-    cd_display1("Use your manual!");
-    cd_display2("Press when ready");
-    while (gpio_get(SS_BTN_RED) && gpio_get(SS_BTN_GREEN) &&
-           gpio_get(SS_BTN_BLUE) && gpio_get(SS_BTN_YELLOW)) sleep_ms(1);
-    while (!gpio_get(SS_BTN_RED) || !gpio_get(SS_BTN_GREEN) ||
-           !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) sleep_ms(10);
-    sleep_ms(300);
-
-    // ── Round 2: Color Round (manual lookup) ─────────────────────────────────
-    simon_says_generate(6);
-
-    static const char code_letters[] = "ABCD";
-    char code_line[17];
-    snprintf(code_line, sizeof(code_line), "Code: %c         ", code_letters[simon_says_get_code()]);
-    cd_display1(code_line);
-    cd_display2("Find your code! ");
-    sleep_ms(5000);
-
-    cd_display1(code_line);
-    cd_display2("Press mapped btn");
-    if (simon_says_color_round(6)) {
-        cd_display1("Correct!        ");
-        cd_display2("Module defused! ");
-        gpio_put(SS_LED_RED,    1);
-        gpio_put(SS_LED_GREEN,  1);
-        gpio_put(SS_LED_BLUE,   1);
-        gpio_put(SS_LED_YELLOW, 1);
-    } else {
-        cd_display1("Wrong!          ");
-        cd_display2("Strike!         ");
-        for (int i = 0; i < 3; i++) {
-            gpio_put(SS_LED_RED, 1); gpio_put(SS_LED_GREEN, 1);
-            gpio_put(SS_LED_BLUE, 1); gpio_put(SS_LED_YELLOW, 1);
-            sleep_ms(200);
-            gpio_put(SS_LED_RED, 0); gpio_put(SS_LED_GREEN, 0);
-            gpio_put(SS_LED_BLUE, 0); gpio_put(SS_LED_YELLOW, 0);
-            sleep_ms(200);
-        }
+        sleep_ms(1500);
     }
     #endif
 
