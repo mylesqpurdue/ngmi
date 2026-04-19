@@ -53,9 +53,6 @@ bool simon_says_selftest(void);
 // Returns true when the module has just been solved (one-shot).
 bool simon_says_update(void);
 
-// Returns the current code (0=A, 1=B, 2=C, 3=D) — display on LCD before input.
-uint8_t simon_says_get_code(void);
-
 // Reset to initial state (e.g., when master sends RESET).
 void simon_says_reset(void);
 

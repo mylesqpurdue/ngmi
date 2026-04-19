@@ -52,25 +52,12 @@ int main(void)
            !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) sleep_ms(10);
     sleep_ms(300);
 
-    // Explain flash types before demo plays
-    cd_display1("1 flash=press it");
-    cd_display2("2 flash=use book");
-    sleep_ms(3000);
-
     cd_display1("Watch carefully!");
     cd_display2("                ");
     simon_says_demo(6);
 
-    // Show the code letter so the player can look it up in the manual
-    static const char code_letters[] = "ABCD";
-    char code_line[17];
-    snprintf(code_line, sizeof(code_line), "Code: %c         ", code_letters[simon_says_get_code()]);
-    cd_display1(code_line);
-    cd_display2("Check manual!   ");
-    sleep_ms(2500);
-
-    cd_display1(code_line);
-    cd_display2("Go!             ");
+    cd_display1("Your turn!      ");
+    cd_display2("Repeat sequence ");
     if (simon_says_collect_input(6)) {
         cd_display1("Correct!        ");
         cd_display2("Module defused! ");
