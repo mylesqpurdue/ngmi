@@ -7,6 +7,20 @@ static uint8_t s_demo_sequence[8];
 static int     s_demo_length    = 0;
 static uint8_t s_user_input[8];
 static int     s_user_input_len = 0;
+static uint8_t s_serial_code    = 0;  // 0=A, 1=B, 2=C, 3=D
+
+// Manual lookup table: rule_map[code][led-1] = button to press
+// Colors: 1=RED 2=GREEN 3=BLUE 4=YELLOW (stored as index 0-3)
+// Code A: Red->Green,  Green->Red,    Blue->Yellow, Yellow->Blue
+// Code B: Red->Yellow, Green->Blue,   Blue->Green,  Yellow->Red
+// Code C: Red->Blue,   Green->Yellow, Blue->Red,    Yellow->Green
+// Code D: Red->Red,    Green->Blue,   Blue->Yellow, Yellow->Green
+static const uint8_t rule_map[4][4] = {
+    {2, 1, 4, 3},
+    {4, 3, 2, 1},
+    {3, 4, 1, 2},
+    {1, 3, 4, 2},
+};
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
@@ -55,6 +69,7 @@ void simon_says_demo(int length) {
     for (int i = 0; i < length; i++)
         s_demo_sequence[i] = (i < 4) ? pool[i] : (uint8_t)(time_us_32() % 4 + 1);
 
+    s_serial_code    = (uint8_t)(time_us_32() % 4);
     s_demo_length    = length;
     s_user_input_len = 0;
 
@@ -122,6 +137,61 @@ bool simon_says_collect_input(int length) {
     }
     return true;
 }
+
+// ─── Color round: generate sequence + pick code, no LED playback ─────────────
+
+void simon_says_generate(int length) {
+    uint8_t pool[4] = {1, 2, 3, 4};
+    for (int i = 3; i > 0; i--) {
+        int j = (int)(time_us_32() % (uint32_t)(i + 1));
+        uint8_t tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+    }
+    for (int i = 0; i < length; i++)
+        s_demo_sequence[i] = (i < 4) ? pool[i] : (uint8_t)(time_us_32() % 4 + 1);
+
+    s_serial_code    = (uint8_t)(time_us_32() % 4);
+    s_demo_length    = length;
+    s_user_input_len = 0;
+}
+
+// ─── Color round: one LED at a time, wait for correct mapped press ────────────
+
+bool simon_says_color_round(int length) {
+    while (!gpio_get(SS_BTN_RED) || !gpio_get(SS_BTN_GREEN) ||
+           !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) sleep_ms(10);
+    sleep_ms(100);
+
+    for (int step = 0; step < length; step++) {
+        // light up the LED for this step
+        int led_pin = (s_demo_sequence[step] == 1) ? SS_LED_RED    :
+                      (s_demo_sequence[step] == 2) ? SS_LED_GREEN  :
+                      (s_demo_sequence[step] == 3) ? SS_LED_BLUE   : SS_LED_YELLOW;
+        gpio_put(led_pin, 1);
+
+        // wait for any button press
+        uint8_t pressed = 0;
+        while (!pressed) {
+            if      (!gpio_get(SS_BTN_RED))    pressed = 1;
+            else if (!gpio_get(SS_BTN_GREEN))  pressed = 2;
+            else if (!gpio_get(SS_BTN_BLUE))   pressed = 3;
+            else if (!gpio_get(SS_BTN_YELLOW)) pressed = 4;
+            sleep_ms(5);
+        }
+
+        gpio_put(led_pin, 0);
+
+        // wait for release
+        while (!gpio_get(SS_BTN_RED) || !gpio_get(SS_BTN_GREEN) ||
+               !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) sleep_ms(5);
+
+        uint8_t expected = rule_map[s_serial_code][s_demo_sequence[step] - 1];
+        if (pressed != expected) return false;
+        sleep_ms(150);
+    }
+    return true;
+}
+
+uint8_t simon_says_get_code(void) { return s_serial_code; }
 
 // ─── Remaining API stubs ─────────────────────────────────────────────────────
 

@@ -5,15 +5,15 @@
 
 // ─── Pin Assignments ─────────────────────────────────────────────────────────
 // LEDs (output)
-#define SS_LED_RED    9
-#define SS_LED_GREEN  8
-#define SS_LED_BLUE   5
+#define SS_LED_BLUE   9
+#define SS_LED_RED    8
+#define SS_LED_GREEN  5
 #define SS_LED_YELLOW 2
 
 // Buttons (input, active-low with internal pull-up)
-#define SS_BTN_RED    36
-#define SS_BTN_GREEN  38
-#define SS_BTN_BLUE   40
+#define SS_BTN_BLUE   36
+#define SS_BTN_RED    38
+#define SS_BTN_GREEN  40
 #define SS_BTN_YELLOW 42
 
 // ─── Game parameters ─────────────────────────────────────────────────────────
@@ -37,6 +37,15 @@ void simon_says_record_input(uint8_t color);
 // Block until `length` button presses are recorded with LED feedback.
 // Returns true if every press matched the demo sequence, false on first mismatch.
 bool simon_says_collect_input(int length);
+
+// Generate sequence + pick code without playing LEDs (use before color round).
+void simon_says_generate(int length);
+
+// Color round: lights one LED at a time and waits for the correct mapped press.
+bool simon_says_color_round(int length);
+
+// Returns the current code letter index (0=A, 1=B, 2=C, 3=D).
+uint8_t simon_says_get_code(void);
 
 // Returns true if the recorded input matches the demo sequence exactly.
 bool simon_says_check_input(void);
