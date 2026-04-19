@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p c:/Project/alexia/.vscode)",
+      "Bash(mkdir -p c:/Project/.vscode)"
+    ]
+  }
+}

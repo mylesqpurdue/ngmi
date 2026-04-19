@@ -2,332 +2,201 @@
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include <string.h>
-#include <stdlib.h>
-#include <stdio.h>
 
-// ─── Internal state ──────────────────────────────────────────────────────────
+static uint8_t s_demo_sequence[8];
+static uint8_t s_use_rule[8];       // 1 = apply manual rule, 0 = press what you see
+static int     s_demo_length    = 0;
+static uint8_t s_user_input[8];
+static int     s_user_input_len = 0;
+static uint8_t s_serial_code    = 0;  // 0=A, 1=B, 2=C, 3=D
 
-typedef enum {
-    SS_STATE_IDLE,          // waiting for game to go ACTIVE
-    SS_STATE_SHOW_SEQUENCE, // playing back the sequence to the player
-    SS_STATE_WAIT_INPUT,    // waiting for button presses from player
-    SS_STATE_ROUND_WIN,     // brief celebration flash before next round
-    SS_STATE_SOLVED,        // all rounds complete
-    SS_STATE_FAILED,        // wrong press — strike
-} ss_state_t;
+// Manual lookup table: rule_map[code][led-1] = button to press
+// Colors: 1=RED 2=GREEN 3=BLUE 4=YELLOW (stored as index 0-3)
+// Code A: Red→Green,  Green→Red,    Blue→Yellow, Yellow→Blue
+// Code B: Red→Yellow, Green→Blue,   Blue→Green,  Yellow→Red
+// Code C: Red→Blue,   Green→Yellow, Blue→Red,    Yellow→Green
+// Code D: Red→Red,    Green→Blue,   Blue→Yellow, Yellow→Green
+static const uint8_t rule_map[4][4] = {
+    {2, 1, 4, 3},
+    {4, 3, 2, 1},
+    {3, 4, 1, 2},
+    {1, 3, 4, 2},
+};
 
-static ss_state_t s_state     = SS_STATE_IDLE;
-static uint8_t    s_sequence[SS_MAX_ROUNDS];
-static uint8_t    s_round     = 0;   // current round (0-indexed)
-static uint8_t    s_input_idx = 0;   // how many presses entered this round
-static bool       s_active    = false;
+// ─── Init ────────────────────────────────────────────────────────────────────
 
-// Debounce: track last press time per button.
-static uint32_t s_last_press_ms[4] = {0, 0, 0, 0};
-#define DEBOUNCE_MS 50
+void simon_says_init(void) {
+    gpio_init(SS_LED_RED);    gpio_set_dir(SS_LED_RED,    GPIO_OUT); gpio_put(SS_LED_RED,    0);
+    gpio_init(SS_LED_GREEN);  gpio_set_dir(SS_LED_GREEN,  GPIO_OUT); gpio_put(SS_LED_GREEN,  0);
+    gpio_init(SS_LED_BLUE);   gpio_set_dir(SS_LED_BLUE,   GPIO_OUT); gpio_put(SS_LED_BLUE,   0);
+    gpio_init(SS_LED_YELLOW); gpio_set_dir(SS_LED_YELLOW, GPIO_OUT); gpio_put(SS_LED_YELLOW, 0);
 
-// Playback / timing state
-static uint32_t s_show_step_start = 0;
-static uint8_t  s_show_idx        = 0;
-static bool     s_show_led_on     = false;
-
-// Input timeout
-static uint32_t s_input_start_ms = 0;
-
-// One-shot solved flag for caller
-static bool s_just_solved = false;
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-static const uint LED_PINS[4] = {SS_LED_RED, SS_LED_GREEN, SS_LED_BLUE, SS_LED_YELLOW};
-static const uint BTN_PINS[4] = {SS_BTN_RED, SS_BTN_GREEN, SS_BTN_BLUE, SS_BTN_YELLOW};
-
-static void leds_all_off(void) {
-    for (int i = 0; i < 4; i++) gpio_put(LED_PINS[i], 0);
-}
-
-// Brief flash of all four LEDs used as a "success" indicator.
-static void flash_all_leds(int times_ms, int count) {
-    for (int n = 0; n < count; n++) {
-        for (int i = 0; i < 4; i++) gpio_put(LED_PINS[i], 1);
-        sleep_ms(times_ms);
-        leds_all_off();
-        sleep_ms(times_ms);
-    }
-}
-
-// Extend the sequence by one random color.
-static void append_random_color(void) {
-    // Use microsecond timer entropy for a simple random pick.
-    uint8_t color = (uint8_t)(time_us_32() % 4);
-    s_sequence[s_round] = color;
-}
-
-// ─── Non-blocking sequence playback state machine ────────────────────────────
-// Called every loop iteration while s_state == SS_STATE_SHOW_SEQUENCE.
-// Steps through: LED on for SS_SHOW_MS → LED off for SS_SHOW_GAP_MS → next.
-
-static void run_show_sequence(void) {
-    uint32_t now = to_ms_since_boot(get_absolute_time());
-
-    if (!s_show_led_on) {
-        // Turn on the next LED in the sequence
-        leds_all_off();
-        gpio_put(LED_PINS[s_sequence[s_show_idx]], 1);
-        s_show_led_on    = true;
-        s_show_step_start = now;
-    } else if (now - s_show_step_start >= SS_SHOW_MS) {
-        // Time to turn the LED off
-        leds_all_off();
-        s_show_led_on    = false;
-        s_show_step_start = now;
-
-        // Wait for gap, then decide next step
-        // We handle gap in the next call by checking elapsed > SHOW_MS + GAP_MS
-        // Simpler: just use a two-phase elapsed check.
-    }
-
-    // Gap phase: after LED off, wait GAP_MS before proceeding
-    if (!s_show_led_on && (now - s_show_step_start >= SS_SHOW_GAP_MS)) {
-        s_show_idx++;
-        if (s_show_idx > s_round) {
-            // Finished showing current sequence → move to input phase
-            s_show_idx       = 0;
-            s_show_led_on    = false;
-            s_input_idx      = 0;
-            s_input_start_ms = to_ms_since_boot(get_absolute_time());
-            s_state          = SS_STATE_WAIT_INPUT;
-        } else {
-            // Show next LED
-            gpio_put(LED_PINS[s_sequence[s_show_idx]], 1);
-            s_show_led_on    = true;
-            s_show_step_start = now;
-        }
-    }
-}
-
-// ─── Button polling with debounce ────────────────────────────────────────────
-// Returns 0–3 if a new press detected, -1 otherwise.
-
-static int poll_buttons(void) {
-    uint32_t now = to_ms_since_boot(get_absolute_time());
-    for (int i = 0; i < 4; i++) {
-        // Active-low: button pressed = GPIO reads 0
-        if (!gpio_get(BTN_PINS[i]) && (now - s_last_press_ms[i] > DEBOUNCE_MS)) {
-            s_last_press_ms[i] = now;
-            // Brief LED feedback on the pressed button's LED
-            gpio_put(LED_PINS[i], 1);
-            sleep_ms(100);
-            gpio_put(LED_PINS[i], 0);
-            return i;
-        }
-    }
-    return -1;
+    gpio_init(SS_BTN_RED);    gpio_set_dir(SS_BTN_RED,    GPIO_IN); gpio_pull_up(SS_BTN_RED);
+    gpio_init(SS_BTN_GREEN);  gpio_set_dir(SS_BTN_GREEN,  GPIO_IN); gpio_pull_up(SS_BTN_GREEN);
+    gpio_init(SS_BTN_BLUE);   gpio_set_dir(SS_BTN_BLUE,   GPIO_IN); gpio_pull_up(SS_BTN_BLUE);
+    gpio_init(SS_BTN_YELLOW); gpio_set_dir(SS_BTN_YELLOW, GPIO_IN); gpio_pull_up(SS_BTN_YELLOW);
 }
 
 // ─── Startup animation ───────────────────────────────────────────────────────
-// Chase RED→GREEN→BLUE→YELLOW two times, then burst all on/off three times.
 
 void simon_says_startup_animation(void) {
-    // Two full chase cycles
     for (int cycle = 0; cycle < 2; cycle++) {
-        for (int i = 0; i < 4; i++) {
-            leds_all_off();
-            gpio_put(LED_PINS[i], 1);
-            sleep_ms(120);
-        }
+        gpio_put(SS_LED_RED, 1);    gpio_put(SS_LED_GREEN, 0); gpio_put(SS_LED_BLUE, 0); gpio_put(SS_LED_YELLOW, 0); sleep_ms(120);
+        gpio_put(SS_LED_RED, 0);    gpio_put(SS_LED_GREEN, 1); gpio_put(SS_LED_BLUE, 0); gpio_put(SS_LED_YELLOW, 0); sleep_ms(120);
+        gpio_put(SS_LED_RED, 0);    gpio_put(SS_LED_GREEN, 0); gpio_put(SS_LED_BLUE, 1); gpio_put(SS_LED_YELLOW, 0); sleep_ms(120);
+        gpio_put(SS_LED_RED, 0);    gpio_put(SS_LED_GREEN, 0); gpio_put(SS_LED_BLUE, 0); gpio_put(SS_LED_YELLOW, 1); sleep_ms(120);
     }
-    // Reverse chase so it feels like a bounce back
-    for (int i = 2; i >= 0; i--) {
-        leds_all_off();
-        gpio_put(LED_PINS[i], 1);
-        sleep_ms(120);
-    }
-    leds_all_off();
+    gpio_put(SS_LED_RED, 0); gpio_put(SS_LED_GREEN, 0); gpio_put(SS_LED_BLUE, 0); gpio_put(SS_LED_YELLOW, 0);
     sleep_ms(80);
-
-    // Final burst — all on/off three times
-    flash_all_leds(150, 3);
+    for (int i = 0; i < 3; i++) {
+        gpio_put(SS_LED_RED, 1); gpio_put(SS_LED_GREEN, 1); gpio_put(SS_LED_BLUE, 1); gpio_put(SS_LED_YELLOW, 1); sleep_ms(150);
+        gpio_put(SS_LED_RED, 0); gpio_put(SS_LED_GREEN, 0); gpio_put(SS_LED_BLUE, 0); gpio_put(SS_LED_YELLOW, 0); sleep_ms(150);
+    }
     sleep_ms(200);
 }
 
-// ─── Hardware self-test ──────────────────────────────────────────────────────
-// For each of the 4 colors, lights the LED and waits up to 5 s for the
-// matching button press. Prints result over USB serial. Returns true if all
-// four pairs pass.
+// ─── Demo ────────────────────────────────────────────────────────────────────
+// Waits for any button press (entropy), generates a sequence, then plays it.
+// Colors are stored as 1=RED 2=GREEN 3=BLUE 4=YELLOW.
 
-static const char *COLOR_NAMES[4] = {"RED", "GREEN", "BLUE", "YELLOW"};
-#define SELFTEST_TIMEOUT_MS 5000
-
-bool simon_says_selftest(void) {
-    printf("\n=== Simon Says Self-Test ===\n");
-    printf("Press each button when its LED lights up.\n\n");
-
-    bool all_pass = true;
-
-    for (int i = 0; i < 4; i++) {
-        leds_all_off();
-        gpio_put(LED_PINS[i], 1);
-        printf("[%s] LED on — waiting for button... ", COLOR_NAMES[i]);
-
-        uint32_t start = to_ms_since_boot(get_absolute_time());
-        bool passed = false;
-
-        while (to_ms_since_boot(get_absolute_time()) - start < SELFTEST_TIMEOUT_MS) {
-            // Correct button
-            if (!gpio_get(BTN_PINS[i])) {
-                sleep_ms(DEBOUNCE_MS);   // debounce
-                passed = true;
-                break;
-            }
-            // Any wrong button pressed — fail immediately
-            for (int j = 0; j < 4; j++) {
-                if (j != i && !gpio_get(BTN_PINS[j])) {
-                    sleep_ms(DEBOUNCE_MS);
-                    printf("FAIL (wrong button pressed)\n");
-                    all_pass = false;
-                    goto next_led;
-                }
-            }
-        }
-
-        if (passed) {
-            printf("PASS\n");
-            // Blink the LED twice as visual confirmation
-            gpio_put(LED_PINS[i], 0); sleep_ms(100);
-            gpio_put(LED_PINS[i], 1); sleep_ms(100);
-            gpio_put(LED_PINS[i], 0); sleep_ms(100);
-            gpio_put(LED_PINS[i], 1); sleep_ms(100);
-            gpio_put(LED_PINS[i], 0);
-        } else {
-            printf("FAIL (timeout)\n");
-            all_pass = false;
-        }
-
-        next_led:
-        sleep_ms(300);
+void simon_says_demo(int length) {
+    // Sequence generation — time_us_32() varies based on when the caller
+    // triggered this (human press timing in main.c provides the entropy).
+    uint8_t pool[4] = {1, 2, 3, 4};
+    for (int i = 3; i > 0; i--) {
+        int j = (int)(time_us_32() % (uint32_t)(i + 1));
+        uint8_t tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
     }
+    for (int i = 0; i < length; i++)
+        s_demo_sequence[i] = (i < 4) ? pool[i] : (uint8_t)(time_us_32() % 4 + 1);
 
-    leds_all_off();
-    printf("\nSelf-test %s\n", all_pass ? "PASSED" : "FAILED");
-    printf("===========================\n\n");
-    return all_pass;
+    s_serial_code    = (uint8_t)(time_us_32() % 4);
+    s_demo_length    = length;
+    s_user_input_len = 0;
+
+    // randomly assign each step as direct (0) or rule (1)
+    for (int i = 0; i < length; i++)
+        s_use_rule[i] = (uint8_t)(time_us_32() % 2);
+
+    // play sequence
+    for (int i = 0; i < length; i++) {
+        int pin = (s_demo_sequence[i] == 1) ? SS_LED_RED    :
+                  (s_demo_sequence[i] == 2) ? SS_LED_GREEN  :
+                  (s_demo_sequence[i] == 3) ? SS_LED_BLUE   : SS_LED_YELLOW;
+
+        if (s_use_rule[i]) {
+            // double-blink = consult manual
+            gpio_put(pin, 1); sleep_ms(120);
+            gpio_put(pin, 0); sleep_ms(80);
+            gpio_put(pin, 1); sleep_ms(120);
+            gpio_put(pin, 0); sleep_ms(80);
+        } else {
+            // single long flash = press what you see
+            gpio_put(pin, 1);
+            sleep_ms(SS_SHOW_MS);
+            gpio_put(pin, 0);
+        }
+        sleep_ms(SS_SHOW_GAP_MS);
+    }
 }
 
-// ─── Public API ─────────────────────────────────────────────────────────────
+// ─── Collect input ───────────────────────────────────────────────────────────
 
-void simon_says_init(void) {
-    for (int i = 0; i < 4; i++) {
-        gpio_init(LED_PINS[i]);
-        gpio_set_dir(LED_PINS[i], GPIO_OUT);
-        gpio_put(LED_PINS[i], 0);
+bool simon_says_collect_input(int length) {
+    int step = 0;
 
-        gpio_init(BTN_PINS[i]);
-        gpio_set_dir(BTN_PINS[i], GPIO_IN);
-        gpio_pull_up(BTN_PINS[i]);
+    // wait for all buttons released before starting
+    while (!gpio_get(SS_BTN_RED) || !gpio_get(SS_BTN_GREEN) ||
+           !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) sleep_ms(10);
+    sleep_ms(100);
+
+    while (step < length) {
+        uint8_t pressed = 0;
+        int     led_pin = -1;
+
+        if (!gpio_get(SS_BTN_RED)) {
+            pressed = 1; led_pin = SS_LED_RED;
+        } else if (!gpio_get(SS_BTN_GREEN)) {
+            pressed = 2; led_pin = SS_LED_GREEN;
+        } else if (!gpio_get(SS_BTN_BLUE)) {
+            pressed = 3; led_pin = SS_LED_BLUE;
+        } else if (!gpio_get(SS_BTN_YELLOW)) {
+            pressed = 4; led_pin = SS_LED_YELLOW;
+        }
+
+        if (pressed) {
+            gpio_put(led_pin, 1);
+            while (!gpio_get(SS_BTN_RED) || !gpio_get(SS_BTN_GREEN) ||
+                   !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) sleep_ms(5);
+            gpio_put(led_pin, 0);
+
+            uint8_t expected = s_use_rule[step]
+                ? rule_map[s_serial_code][s_demo_sequence[step] - 1]
+                : s_demo_sequence[step];
+            if (pressed != expected) return false;
+            step++;
+            sleep_ms(80);
+        }
     }
-    simon_says_reset();
+    return true;
+}
+
+uint8_t simon_says_get_code(void) { return s_serial_code; }
+
+// ─── Remaining API stubs ─────────────────────────────────────────────────────
+
+bool simon_says_check_input(void) {
+    if (s_user_input_len != s_demo_length) return false;
+    for (int i = 0; i < s_demo_length; i++)
+        if (s_user_input[i] != s_demo_sequence[i]) return false;
+    return true;
+}
+
+void simon_says_record_input(uint8_t color) {
+    if (s_user_input_len < s_demo_length)
+        s_user_input[s_user_input_len++] = color;
 }
 
 void simon_says_reset(void) {
-    leds_all_off();
-    s_state        = SS_STATE_IDLE;
-    s_round        = 0;
-    s_input_idx    = 0;
-    s_show_idx     = 0;
-    s_show_led_on  = false;
-    s_just_solved  = false;
-    memset(s_sequence, 0, sizeof(s_sequence));
+    gpio_put(SS_LED_RED, 0); gpio_put(SS_LED_GREEN, 0);
+    gpio_put(SS_LED_BLUE, 0); gpio_put(SS_LED_YELLOW, 0);
+    s_demo_length    = 0;
+    s_user_input_len = 0;
+    memset(s_demo_sequence, 0, sizeof(s_demo_sequence));
+    memset(s_use_rule,      0, sizeof(s_use_rule));
+    memset(s_user_input,    0, sizeof(s_user_input));
 }
 
-void simon_says_set_active(bool active) {
-    s_active = active;
-    if (active && s_state == SS_STATE_IDLE) {
-        // Begin round 0: add first color and start showing
-        append_random_color();
-        s_show_idx    = 0;
-        s_show_led_on = false;
-        s_state       = SS_STATE_SHOW_SEQUENCE;
-    }
-}
+void simon_says_set_active(bool active) { (void)active; }
+bool simon_says_update(void)            { return false; }
 
-bool simon_says_update(void) {
-    if (!s_active) return false;
+bool simon_says_selftest(void) {
+    bool pass = true;
+    uint32_t t;
 
-    s_just_solved = false;
+    gpio_put(SS_LED_RED, 1);
+    t = to_ms_since_boot(get_absolute_time());
+    while (gpio_get(SS_BTN_RED))
+        if (to_ms_since_boot(get_absolute_time()) - t > 5000) { pass = false; break; }
+    gpio_put(SS_LED_RED, 0); sleep_ms(300);
 
-    switch (s_state) {
+    gpio_put(SS_LED_GREEN, 1);
+    t = to_ms_since_boot(get_absolute_time());
+    while (gpio_get(SS_BTN_GREEN))
+        if (to_ms_since_boot(get_absolute_time()) - t > 5000) { pass = false; break; }
+    gpio_put(SS_LED_GREEN, 0); sleep_ms(300);
 
-        case SS_STATE_IDLE:
-            // Waiting for simon_says_set_active(true)
-            break;
+    gpio_put(SS_LED_BLUE, 1);
+    t = to_ms_since_boot(get_absolute_time());
+    while (gpio_get(SS_BTN_BLUE))
+        if (to_ms_since_boot(get_absolute_time()) - t > 5000) { pass = false; break; }
+    gpio_put(SS_LED_BLUE, 0); sleep_ms(300);
 
-        case SS_STATE_SHOW_SEQUENCE:
-            run_show_sequence();
-            break;
+    gpio_put(SS_LED_YELLOW, 1);
+    t = to_ms_since_boot(get_absolute_time());
+    while (gpio_get(SS_BTN_YELLOW))
+        if (to_ms_since_boot(get_absolute_time()) - t > 5000) { pass = false; break; }
+    gpio_put(SS_LED_YELLOW, 0); sleep_ms(300);
 
-        case SS_STATE_WAIT_INPUT: {
-            // Check input timeout
-            uint32_t elapsed = to_ms_since_boot(get_absolute_time()) - s_input_start_ms;
-            if (elapsed > SS_INPUT_TIMEOUT_MS) {
-                s_state = SS_STATE_FAILED;
-                break;
-            }
-
-            int pressed = poll_buttons();
-            if (pressed < 0) break;
-
-            if ((uint8_t)pressed == s_sequence[s_input_idx]) {
-                s_input_idx++;
-                if (s_input_idx > s_round) {
-                    // Correct round complete
-                    s_round++;
-                    if (s_round >= SS_MAX_ROUNDS) {
-                        flash_all_leds(200, 3);
-                        s_state       = SS_STATE_SOLVED;
-                        s_just_solved = true;
-                    } else {
-                        s_state = SS_STATE_ROUND_WIN;
-                    }
-                }
-            } else {
-                // Wrong button
-                s_state = SS_STATE_FAILED;
-            }
-            break;
-        }
-
-        case SS_STATE_ROUND_WIN:
-            // Brief pause then start next round
-            sleep_ms(600);
-            append_random_color();
-            s_show_idx    = 0;
-            s_show_led_on = false;
-            s_state       = SS_STATE_SHOW_SEQUENCE;
-            break;
-
-        case SS_STATE_SOLVED:
-            // Stay solved; caller reads s_just_solved once.
-            break;
-
-        case SS_STATE_FAILED:
-            // Flash all LEDs to indicate failure, then restart sequence
-            for (int i = 0; i < 3; i++) {
-                leds_all_off(); sleep_ms(150);
-                for (int j = 0; j < 4; j++) gpio_put(LED_PINS[j], 1);
-                sleep_ms(150);
-            }
-            leds_all_off();
-
-            // Reset and regenerate — player must retry from round 1
-            simon_says_reset();
-            s_active = true;
-            append_random_color();
-            s_show_idx    = 0;
-            s_show_led_on = false;
-            s_state       = SS_STATE_SHOW_SEQUENCE;
-            break;
-    }
-
-    return s_just_solved;
+    return pass;
 }

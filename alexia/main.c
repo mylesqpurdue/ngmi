@@ -1,108 +1,105 @@
-#include "pico/stdlib.h"
-#include "hardware/uart.h"
-#include "../common/common.h"
-#include "simon_says.h"
-#include "timer_module.h"
-#include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "pico/stdlib.h"
+#include "hardware/spi.h"
+#include "seg7.h"
+#include "timer_module.h"
+#include "simon_says.h"
+#include "chardisp.h"
 
-// ─── Board: Alexia's RP2350 ───────────────────────────────────────────────────
-// Responsibilities:
-//   1. Simon Says / Memory Game  (GPIO 0–7, see simon_says.h)
-//   2. Countdown Timer display   (TM1637 on GPIO 14–15, see timer_module.h)
-//   3. UART0 to master           (GPIO 12–13, 115200 baud)
-//
-// Game loop:
-//   - Listens for game-state broadcasts from master via UART0.
-//   - When ACTIVE: runs Simon Says; timer counts down.
-//   - When Simon Says is solved: notifies master via UART0.
-//   - When timer expires: notifies master (EXPLODED).
+//////////////////////////////////////////////////////////////////////////////
 
-// ─── Local UART RX for game-state parsing ────────────────────────────────────
-// (timer_module already owns the UART instance; we share it here for state
-// updates that affect Simon Says independently.)
+const char* username = "adelcuvi";
 
-static game_state_t s_current_state   = GAME_IDLE;
-static bool         s_simon_complete  = false;
+const int SEG7_DMA_CHANNEL = 0;
 
-static char s_rx_buf[64];
-static uint s_rx_idx = 0;
+const int SPI_7SEG_SCK = 14;
+const int SPI_7SEG_CSn = 13;
+const int SPI_7SEG_TX  = 15;
 
-static void handle_master_message(const char *line) {
-    if (strncmp(line, "$STATE:", 7) == 0) {
-        const char *s = line + 7;
-        game_state_t new_state = s_current_state;
-        if      (strcmp(s, "ACTIVE")   == 0) new_state = GAME_ACTIVE;
-        else if (strcmp(s, "DEFUSED")  == 0) new_state = GAME_DEFUSED;
-        else if (strcmp(s, "EXPLODED") == 0) new_state = GAME_EXPLODED;
-        else if (strcmp(s, "IDLE")     == 0) new_state = GAME_IDLE;
-        else if (strcmp(s, "ARMED")    == 0) new_state = GAME_ARMED;
+const int SPI_DISP_SCK = 34;
+const int SPI_DISP_CSn = 33;
+const int SPI_DISP_TX  = 35;
 
-        if (new_state != s_current_state) {
-            s_current_state = new_state;
-            timer_set_game_state(new_state);
-            simon_says_set_active(new_state == GAME_ACTIVE && !s_simon_complete);
-        }
-    } else if (strcmp(line, "$RESET") == 0) {
-        s_current_state  = GAME_IDLE;
-        s_simon_complete = false;
-        simon_says_reset();
-        timer_reset();
-    }
-}
+//////////////////////////////////////////////////////////////////////////////
 
-static void poll_uart(void) {
-    while (uart_is_readable(uart0)) {
-        char c = (char)uart_getc(uart0);
-        if (c == '\n' || c == '\r') {
-            if (s_rx_idx > 0) {
-                s_rx_buf[s_rx_idx] = '\0';
-                handle_master_message(s_rx_buf);
-                s_rx_idx = 0;
-            }
-        } else if (s_rx_idx < (uint)(sizeof(s_rx_buf) - 1)) {
-            s_rx_buf[s_rx_idx++] = c;
-        }
-    }
-}
+// When testing the LCD display
+#define STEP2
+// When testing the 7-segment timer display (GPIO 26 start, GPIO 21 reset)
+// #define STEP3
+// When testing the full bomb game integration
+// #define STEP4
 
-// ─── Entry point ─────────────────────────────────────────────────────────────
+//////////////////////////////////////////////////////////////////////////////
 
-int main(void) {
-    stdio_init_all();
-
+int main(void)
+{
+    #ifdef STEP2
     simon_says_init();
-    timer_module_init();   // also initialises UART0
+    init_chardisp_pins();
+    cd_init();
 
-    // ── Startup sequence ──────────────────────────────────────────────────────
-    // 1. Play LED chase animation so the player knows the board is alive.
     simon_says_startup_animation();
 
-    // 2. Run hardware self-test: verifies every LED/button pair is correctly
-    //    wired. Results print over USB serial. Board continues regardless so
-    //    the game still works even without a host connected.
-    simon_says_selftest();
+    cd_display1("Simon Says!     ");
+    cd_display2("Press to start  ");
 
-    while (true) {
-        // 1. Read any incoming UART messages from master
-        poll_uart();
+    // Wait for any button press — human timing seeds the random sequence
+    while (gpio_get(SS_BTN_RED) && gpio_get(SS_BTN_GREEN) &&
+           gpio_get(SS_BTN_BLUE) && gpio_get(SS_BTN_YELLOW)) sleep_ms(1);
+    while (!gpio_get(SS_BTN_RED) || !gpio_get(SS_BTN_GREEN) ||
+           !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) sleep_ms(10);
+    sleep_ms(300);
 
-        // 2. Update timer display + internal countdown
-        timer_update();
+    // Explain flash types before demo plays
+    cd_display1("1 flash=press it");
+    cd_display2("2 flash=use book");
+    sleep_ms(3000);
 
-        // 3. Run Simon Says game tick
-        if (!s_simon_complete && s_current_state == GAME_ACTIVE) {
-            bool just_solved = simon_says_update();
-            if (just_solved) {
-                s_simon_complete = true;
-                uart_puts(uart0, "$SOLVED:SIMON_SAYS\n");
-            }
+    cd_display1("Watch carefully!");
+    cd_display2("                ");
+    simon_says_demo(6);
+
+    // Show the code letter so the player can look it up in the manual
+    static const char code_letters[] = "ABCD";
+    char code_line[17];
+    snprintf(code_line, sizeof(code_line), "Code: %c         ", code_letters[simon_says_get_code()]);
+    cd_display1(code_line);
+    cd_display2("Check manual!   ");
+    sleep_ms(2500);
+
+    cd_display1(code_line);
+    cd_display2("Go!             ");
+    if (simon_says_collect_input(6)) {
+        cd_display1("Correct!        ");
+        cd_display2("Module defused! ");
+        gpio_put(SS_LED_RED,    1);
+        gpio_put(SS_LED_GREEN,  1);
+        gpio_put(SS_LED_BLUE,   1);
+        gpio_put(SS_LED_YELLOW, 1);
+    } else {
+        cd_display1("Wrong!          ");
+        cd_display2("Strike!         ");
+        for (int i = 0; i < 3; i++) {
+            gpio_put(SS_LED_RED, 1); gpio_put(SS_LED_GREEN, 1);
+            gpio_put(SS_LED_BLUE, 1); gpio_put(SS_LED_YELLOW, 1);
+            sleep_ms(200);
+            gpio_put(SS_LED_RED, 0); gpio_put(SS_LED_GREEN, 0);
+            gpio_put(SS_LED_BLUE, 0); gpio_put(SS_LED_YELLOW, 0);
+            sleep_ms(200);
         }
-
-        // A small yield keeps the loop from spinning too hot while still
-        // being responsive to button presses.
-        sleep_us(500);
     }
+    #endif
 
+    #ifdef STEP3
+    timer_module_init();
+    timer_set_game_state(GAME_ARMED);
+    for (;;) {
+        timer_update();
+    }
+    #endif
+
+    for (;;);
     return 0;
 }

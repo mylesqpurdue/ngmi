@@ -6,6 +6,10 @@
 
 // Pin assignments are defined in seg7.h (SEG7_SCK_PIN, SEG7_TX_PIN, SEG7_CSN_PIN).
 
+// ─── Timer button pins ───────────────────────────────────────────────────────
+#define TIMER_BTN_START  21   // press to start the countdown
+#define TIMER_BTN_RESET  26   // press to reset countdown back to default
+
 // ─── Default countdown duration (seconds) ───────────────────────────────────
 #define TIMER_DEFAULT_SECONDS  300   // 5:00
 

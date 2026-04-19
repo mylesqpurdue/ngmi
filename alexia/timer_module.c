@@ -1,11 +1,15 @@
 #include "timer_module.h"
 #include "seg7.h"
 #include "pico/stdlib.h"
-#include "hardware/uart.h"
+#include "hardware/spi.h"
 #include "hardware/gpio.h"
 #include "hardware/timer.h"
 #include <string.h>
 #include <stdio.h>
+
+// Make sure to set these in main.c
+extern const int SPI_7SEG_SCK; extern const int SPI_7SEG_CSn; extern const int SPI_7SEG_TX;
+extern const int SEG7_DMA_CHANNEL;
 
 // ─── Internal state ──────────────────────────────────────────────────────────
 
@@ -32,80 +36,52 @@ static bool timer_irq_callback(struct repeating_timer *t) {
         s_expired = true;
     }
     s_colon_blink = !s_colon_blink;
-    return true;  // keep repeating
+    return true;
 }
 
-// ─── UART helpers ────────────────────────────────────────────────────────────
+// ─── Button polling (debounced, active-low) ──────────────────────────────────
 
-static void uart_send(const char *msg) {
-    uart_puts(uart0, msg);
-}
+#define BTN_DEBOUNCE_MS 50
 
-static char s_rx_buf[64];
-static uint  s_rx_idx = 0;
+static uint32_t s_start_last_ms = 0;
+static uint32_t s_reset_last_ms = 0;
 
-// Parse one complete line received from master.
-static void process_rx_line(const char *line) {
-    if (strncmp(line, "$STATE:", 7) == 0) {
-        const char *state_str = line + 7;
-        if      (strcmp(state_str, "IDLE")     == 0) timer_set_game_state(GAME_IDLE);
-        else if (strcmp(state_str, "ARMED")    == 0) timer_set_game_state(GAME_ARMED);
-        else if (strcmp(state_str, "ACTIVE")   == 0) timer_set_game_state(GAME_ACTIVE);
-        else if (strcmp(state_str, "DEFUSED")  == 0) timer_set_game_state(GAME_DEFUSED);
-        else if (strcmp(state_str, "EXPLODED") == 0) timer_set_game_state(GAME_EXPLODED);
-    } else if (strcmp(line, "$RESET") == 0) {
-        timer_reset();
-    }
-}
+static void poll_buttons(void) {
+    uint32_t now = to_ms_since_boot(get_absolute_time());
 
-// Non-blocking character-by-character UART RX, line-assembled.
-static void poll_uart_rx(void) {
-    while (uart_is_readable(uart0)) {
-        char c = (char)uart_getc(uart0);
-        if (c == '\n' || c == '\r') {
-            if (s_rx_idx > 0) {
-                s_rx_buf[s_rx_idx] = '\0';
-                process_rx_line(s_rx_buf);
-                s_rx_idx = 0;
-            }
-        } else if (s_rx_idx < sizeof(s_rx_buf) - 1) {
-            s_rx_buf[s_rx_idx++] = c;
+    if (!gpio_get(TIMER_BTN_START) && (now - s_start_last_ms > BTN_DEBOUNCE_MS)) {
+        s_start_last_ms = now;
+        if (s_game_state == GAME_IDLE || s_game_state == GAME_ARMED) {
+            s_game_state = GAME_ACTIVE;
+            timer_start();
         }
     }
-}
 
-// Broadcast current time to the master every second.
-static uint32_t s_last_broadcast = 0;
-
-static void broadcast_time_if_needed(void) {
-    uint32_t now = to_ms_since_boot(get_absolute_time());
-    if (now - s_last_broadcast >= 1000) {
-        s_last_broadcast = now;
-        char buf[32];
-        snprintf(buf, sizeof(buf), "$TIME:%lu\n", (unsigned long)s_remaining);
-        uart_send(buf);
+    if (!gpio_get(TIMER_BTN_RESET) && (now - s_reset_last_ms > BTN_DEBOUNCE_MS)) {
+        s_reset_last_ms = now;
+        timer_reset();
     }
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 void timer_module_init(void) {
-    // SPI 7-segment display
     seg7_init();
 
-    // UART0 for master communication
-    uart_init(uart0, UART_BAUD_RATE);
-    gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
-    uart_set_format(uart0, 8, 1, UART_PARITY_NONE);
+    gpio_init(TIMER_BTN_START);
+    gpio_set_dir(TIMER_BTN_START, GPIO_IN);
+    gpio_pull_up(TIMER_BTN_START);
 
-    // Hardware repeating timer — 1 Hz
+    gpio_init(TIMER_BTN_RESET);
+    gpio_set_dir(TIMER_BTN_RESET, GPIO_IN);
+    gpio_pull_up(TIMER_BTN_RESET);
+
     add_repeating_timer_ms(-1000, timer_irq_callback, NULL, &s_hw_timer);
 
-    s_remaining  = TIMER_DEFAULT_SECONDS;
-    s_running    = false;
-    s_expired    = false;
-    s_game_state = GAME_IDLE;
+    s_remaining   = TIMER_DEFAULT_SECONDS;
+    s_running     = false;
+    s_expired     = false;
+    s_game_state  = GAME_IDLE;
 }
 
 void timer_start(void) {
@@ -114,13 +90,11 @@ void timer_start(void) {
 }
 
 void timer_reset(void) {
-    s_running    = false;
-    s_expired    = false;
-    s_remaining  = TIMER_DEFAULT_SECONDS;
-    s_game_state = GAME_IDLE;
+    s_running     = false;
+    s_expired     = false;
+    s_remaining   = TIMER_DEFAULT_SECONDS;
+    s_game_state  = GAME_ARMED;
     s_colon_blink = false;
-    seg7_clear();
-    seg7_refresh();
 }
 
 void timer_set_game_state(game_state_t state) {
@@ -135,40 +109,33 @@ void timer_set_game_state(game_state_t state) {
             break;
         case GAME_IDLE:
         case GAME_ARMED:
-            // nothing — wait for ACTIVE
             break;
     }
 }
 
 void timer_update(void) {
-    poll_uart_rx();
+    poll_buttons();
 
-    uint32_t rem = s_remaining;
+    uint32_t rem  = s_remaining;
     uint8_t  mins = rem / 60;
     uint8_t  secs = rem % 60;
 
     switch (s_game_state) {
         case GAME_IDLE:
-            // Show dashes across all 8 digits until the game arms
             seg7_show_dashes();
             seg7_refresh();
             break;
 
         case GAME_ARMED:
-            // Show full start time, separator always on
             seg7_display_time(mins, secs, true);
             seg7_refresh();
             break;
 
         case GAME_ACTIVE:
-            // Count down; blink separator each second via s_colon_blink
             seg7_display_time(mins, secs, s_colon_blink);
             seg7_refresh();
-            if (s_running) broadcast_time_if_needed();
             if (s_expired) {
-                // Notify master
-                uart_send("$SOLVED:TIMER_EXPIRED\n");
-                // Flash 00.00 rapidly to indicate explosion
+                // Flash 00.00 to indicate explosion
                 for (int i = 0; i < 6; i++) {
                     seg7_display_time(0, 0, true);  seg7_refresh(); sleep_ms(150);
                     seg7_clear();                   seg7_refresh(); sleep_ms(150);
@@ -179,13 +146,11 @@ void timer_update(void) {
             break;
 
         case GAME_DEFUSED:
-            // Freeze display at current time, separator on
             seg7_display_time(mins, secs, true);
             seg7_refresh();
             break;
 
         case GAME_EXPLODED:
-            // Show 00.00
             seg7_display_time(0, 0, true);
             seg7_refresh();
             break;

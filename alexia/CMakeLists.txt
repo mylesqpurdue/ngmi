@@ -5,6 +5,7 @@ add_executable(alexia_board
     simon_says.c
     timer_module.c
     seg7.c
+    chardisp.c
 )
 
 target_include_directories(alexia_board PRIVATE
@@ -15,10 +16,9 @@ target_include_directories(alexia_board PRIVATE
 target_link_libraries(alexia_board
     pico_stdlib
     hardware_gpio
+    hardware_spi
     hardware_uart
     hardware_timer
-    hardware_spi
-    hardware_dma
 )
 
 # Enable USB serial output for debugging (optional — remove for final build)

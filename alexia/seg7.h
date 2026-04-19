@@ -7,9 +7,7 @@
 // SPI1 supports SCK on GPIO14 and TX on GPIO15 natively.
 #define SEG7_SCK_PIN  14   // SPI1 SCK
 #define SEG7_TX_PIN   15   // SPI1 TX (MOSI)
-#define SEG7_CSN_PIN   9   // chip-select (free GPIO, active-low)
-
-#define SEG7_DMA_CHANNEL 0
+#define SEG7_CSN_PIN  13   // manual GPIO CSn → 74HC595 RCLK
 
 // msg[] is the live display buffer — 8 digits, each entry is:
 //   bits [10:8] = digit position (0–7)

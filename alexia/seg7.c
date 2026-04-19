@@ -2,7 +2,6 @@
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
 #include "hardware/gpio.h"
-#include "hardware/dma.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -28,8 +27,8 @@ char font[128] = {
 };
 
 // ─── Display buffer ──────────────────────────────────────────────────────────
-// Aligned to 16 bytes for DMA compatibility (matches lab requirement).
-// Format per entry: bits[10:8] = position, bits[7:0] = segment pattern.
+// 16-byte aligned to stay compatible with the lab's DMA-friendly format.
+// Format per entry: bits[10:8] = digit position, bits[7:0] = segment pattern.
 uint16_t __attribute__((aligned(16))) msg[8] = {
     (0 << 8) | 0x00,
     (1 << 8) | 0x00,
@@ -41,15 +40,51 @@ uint16_t __attribute__((aligned(16))) msg[8] = {
     (7 << 8) | 0x00,
 };
 
-// ─── SPI init (mirrors display_init_spi from lab) ────────────────────────────
+// ─── GPIO bit-bang init (mirrors display_init_bitbang from lab) ──────────────
 
-static void _spi_init(void) {
-    gpio_set_function(SEG7_SCK_PIN, GPIO_FUNC_SPI);
-    gpio_set_function(SEG7_TX_PIN,  GPIO_FUNC_SPI);
-    gpio_set_function(SEG7_CSN_PIN, GPIO_FUNC_SPI);
+static void _bitbang_init(void) {
+    gpio_init(SEG7_CSN_PIN);
+    gpio_init(SEG7_SCK_PIN);
+    gpio_init(SEG7_TX_PIN);
 
-    spi_init(spi1, 125000);
-    spi_set_format(spi1, 16, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+    gpio_set_dir(SEG7_CSN_PIN, GPIO_OUT);
+    gpio_set_dir(SEG7_SCK_PIN, GPIO_OUT);
+    gpio_set_dir(SEG7_TX_PIN,  GPIO_OUT);
+
+    gpio_put(SEG7_CSN_PIN, 1);  // deselect
+    gpio_put(SEG7_SCK_PIN, 0);
+    gpio_put(SEG7_TX_PIN,  0);
+}
+
+// ─── Bit-bang SPI send (mirrors display_bitbang_spi from lab) ────────────────
+// Sends all 8 entries of msg[] to the display, MSB first, 16 bits per digit.
+
+static void _bitbang_send(void) {
+    for (int i = 0; i < 8; i++) {
+        uint16_t data_packet = (i << 8) | (uint8_t)msg[i];
+
+        // pull CS low to select digit
+        gpio_put(SEG7_CSN_PIN, 0);
+        sleep_us(10);
+
+        // send 16 bits MSB first
+        for (int bit = 15; bit >= 0; bit--) {
+            bool bit_val = (data_packet >> bit) & 0x1;
+
+            gpio_put(SEG7_TX_PIN, bit_val);
+            sleep_us(1);
+
+            gpio_put(SEG7_SCK_PIN, 1);  // rising edge latches data
+            sleep_us(5);
+
+            gpio_put(SEG7_SCK_PIN, 0);
+            sleep_us(5);
+        }
+
+        // pull CS high to latch this digit
+        gpio_put(SEG7_CSN_PIN, 1);
+        sleep_us(10);
+    }
 }
 
 // ─── String → msg[] (mirrors display_char_print from lab) ───────────────────
@@ -61,9 +96,8 @@ void seg7_print(const char *str) {
     for (int i = 0; i < 8 && str[i] != '\0'; i++) {
         if (str[i] == '.') {
             if (dp_found) continue;
-            if (out_idx > 0) {
-                msg[out_idx - 1] |= (1 << 7);   // set dp bit on previous digit
-            }
+            if (out_idx > 0)
+                msg[out_idx - 1] |= (1 << 7);  // set dp bit on previous digit
             dp_found = 1;
         } else {
             uint16_t seg = (uint16_t)(uint8_t)font[(unsigned char)str[i]];
@@ -72,29 +106,35 @@ void seg7_print(const char *str) {
             out_idx++;
         }
     }
-    // Blank any remaining positions
-    for (; out_idx < 8; out_idx++) {
+    // blank remaining positions
+    for (; out_idx < 8; out_idx++)
         msg[out_idx] = (uint16_t)(out_idx << 8);
-    }
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 void seg7_init(void) {
-    _spi_init();
+    // SCK and TX use hardware SPI1; CSn is manual GPIO to avoid
+    // conflict with UART0 RX on GPIO 13
+    gpio_set_function(SEG7_SCK_PIN, GPIO_FUNC_SPI);
+    gpio_set_function(SEG7_TX_PIN,  GPIO_FUNC_SPI);
+
+    gpio_init(SEG7_CSN_PIN);
+    gpio_set_dir(SEG7_CSN_PIN, GPIO_OUT);
+    gpio_put(SEG7_CSN_PIN, 1);  // deselect
+
+    spi_init(spi1, 125000);
+    spi_set_format(spi1, 16, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
     seg7_clear();
     seg7_refresh();
 }
 
 void seg7_display_time(uint8_t minutes, uint8_t seconds, bool separator_on) {
     char buf[10];
-    if (separator_on) {
-        // "  MM.SS " — decimal point acts as minute/second separator
-        snprintf(buf, sizeof(buf), "  %02d.%02d", minutes, seconds);
-    } else {
-        // Separator off: show time with a space gap so it visually blinks
-        snprintf(buf, sizeof(buf), "  %02d %02d", minutes, seconds);
-    }
+    if (separator_on)
+        snprintf(buf, sizeof(buf), "    %02d.%02d", minutes, seconds);
+    else
+        snprintf(buf, sizeof(buf), "    %02d %02d", minutes, seconds);
     seg7_print(buf);
 }
 
@@ -103,14 +143,15 @@ void seg7_show_dashes(void) {
 }
 
 void seg7_clear(void) {
-    for (int i = 0; i < 8; i++) {
-        msg[i] = (uint16_t)(i << 8);   // position bits only, segments off
-    }
+    for (int i = 0; i < 8; i++)
+        msg[i] = (uint16_t)(i << 8);
 }
 
-// Write current msg[] to the display over SPI (mirrors display_print from lab).
 void seg7_refresh(void) {
     for (int i = 0; i < 8; i++) {
+        gpio_put(SEG7_CSN_PIN, 0);           // select → start shift
         spi_write16_blocking(spi1, &msg[i], 1);
+        gpio_put(SEG7_CSN_PIN, 1);           // latch → 74HC595 RCLK rising edge
+        sleep_us(1250);                       // equal time per digit → ~100 Hz refresh
     }
 }
