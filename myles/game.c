@@ -4,24 +4,33 @@
 #include "pico/rand.h"
 #include "pico/stdlib.h"
 
-// Track initial pot values for dead-zone detection in IDLE state
 static float initial_freq = -1.0f;
 static float initial_amp = -1.0f;
+
+// Stability tracking — pots must be still before lock counts
+static float prev_freq = -1.0f;
+static float prev_amp = -1.0f;
+static uint64_t stable_since_us = 0;
+#define STABLE_THRESHOLD 0.15f   // Max change per frame to count as "still"
+#define STABLE_TIME_US   500000  // 0.5 seconds of stillness required
 
 void game_init(game_ctx_t *ctx) {
     ctx->state = WAVE_IDLE;
     ctx->lock_start_us = 0;
     ctx->win_start_ms = 0;
     ctx->play_start_us = 0;
+    ctx->wait_start_us = 0;
     ctx->freq_matched = false;
     ctx->amp_matched = false;
 
-    // Pick random signal color (0-3) which determines base rounds (2-5)
     ctx->signal_color = get_rand_32() % NUM_SIGNAL_COLORS;
     ctx->base_rounds = BASE_ROUNDS_MIN + ctx->signal_color;
     ctx->strikes = 0;
     ctx->rounds_won = 0;
     ctx->module_complete = false;
+
+    initial_freq = -1.0f;
+    initial_amp = -1.0f;
 
     game_new_target(&ctx->target);
 }
@@ -45,12 +54,9 @@ int game_rounds_needed(const game_ctx_t *ctx) {
 
 int game_update(game_ctx_t *ctx, float player_freq, float player_amp,
                 uint64_t now_us) {
-    int event = 0;  // 0=nothing, 1=strike, 2=module complete
+    int event = 0;
 
-    // If module is already complete, do nothing
-    if (ctx->module_complete) {
-        return 0;
-    }
+    if (ctx->module_complete) return 0;
 
     switch (ctx->state) {
         case WAVE_IDLE:
@@ -67,25 +73,39 @@ int game_update(game_ctx_t *ctx, float player_freq, float player_amp,
             break;
 
         case WAVE_PLAYING: {
-            // Check for strike (too slow)
+            // Strike timer — too slow
             uint64_t play_elapsed = now_us - ctx->play_start_us;
             if (play_elapsed >= STRIKE_TIME_US) {
                 ctx->strikes++;
-                ctx->play_start_us = now_us;  // Reset strike timer
+                ctx->play_start_us = now_us;
                 event = 1;
-                // Flash red briefly to indicate strike
                 led_set_color(255, 0, 0);
                 sleep_ms(200);
                 led_set_playing();
             }
 
-            // Evaluate match conditions
+            // Track pot stability
+            bool pots_stable = false;
+            if (prev_freq >= 0.0f) {
+                bool freq_still = fabsf(player_freq - prev_freq) < STABLE_THRESHOLD;
+                bool amp_still = fabsf(player_amp - prev_amp) < STABLE_THRESHOLD;
+                if (freq_still && amp_still) {
+                    if (stable_since_us == 0) stable_since_us = now_us;
+                    pots_stable = (now_us - stable_since_us) >= STABLE_TIME_US;
+                } else {
+                    stable_since_us = 0;
+                }
+            }
+            prev_freq = player_freq;
+            prev_amp = player_amp;
+
+            // Match detection — only lock when pots are stable
             ctx->freq_matched = game_check_freq_match(player_freq,
                                     ctx->target.frequency, FREQ_TOLERANCE);
             ctx->amp_matched = game_check_amp_match(player_amp,
                                     ctx->target.amplitude, AMP_TOLERANCE);
 
-            if (ctx->freq_matched && ctx->amp_matched) {
+            if (ctx->freq_matched && ctx->amp_matched && pots_stable) {
                 if (ctx->lock_start_us == 0) {
                     ctx->lock_start_us = now_us;
                 }
@@ -96,17 +116,10 @@ int game_update(game_ctx_t *ctx, float player_freq, float player_amp,
 
                 if (elapsed >= LOCK_DURATION_US) {
                     ctx->rounds_won++;
-                    if (ctx->rounds_won >= game_rounds_needed(ctx)) {
-                        // Module complete!
-                        ctx->state = WAVE_COMPLETE;
-                        ctx->module_complete = true;
-                        led_set_win();
-                        event = 2;
-                    } else {
-                        ctx->state = WAVE_WIN;
-                        ctx->win_start_ms = now_us / 1000;
-                        led_set_win();
-                    }
+                    ctx->state = WAVE_WIN;
+                    ctx->win_start_ms = now_us / 1000;
+                    led_set_win();
+                    stable_since_us = 0;
                 }
             } else {
                 ctx->lock_start_us = 0;
@@ -118,7 +131,18 @@ int game_update(game_ctx_t *ctx, float player_freq, float player_amp,
         case WAVE_WIN: {
             uint64_t elapsed_ms = (now_us / 1000) - ctx->win_start_ms;
             if (elapsed_ms >= WIN_HOLD_MS) {
-                ctx->state = WAVE_RESET;
+                // Check if player has solved enough
+                if (ctx->rounds_won >= game_rounds_needed(ctx)) {
+                    // Enter WAIT — generate new target so current pot position
+                    // doesn't accidentally match, and player must stop
+                    ctx->state = WAVE_WAIT;
+                    ctx->wait_start_us = now_us;
+                    ctx->lock_start_us = 0;
+                    game_new_target(&ctx->target);
+                } else {
+                    // More rounds needed
+                    ctx->state = WAVE_RESET;
+                }
             }
             break;
         }
@@ -133,11 +157,53 @@ int game_update(game_ctx_t *ctx, float player_freq, float player_amp,
             initial_freq = -1.0f;
             initial_amp = -1.0f;
             ctx->state = WAVE_IDLE;
-            // LED handled by main loop (blinks signal color in IDLE)
             break;
 
+        case WAVE_WAIT: {
+            uint64_t wait_elapsed = now_us - ctx->wait_start_us;
+
+            // Blink green at 2Hz
+            bool on = ((wait_elapsed / 250000) % 2) == 0;
+            if (on) led_set_win();
+            else led_set_color(0, 0, 0);
+
+            // Module complete after waiting long enough
+            if (wait_elapsed >= WAIT_TIME_US) {
+                ctx->state = WAVE_COMPLETE;
+                ctx->module_complete = true;
+                led_set_win();
+                event = 2;
+                break;
+            }
+
+            // Oversolve check — only after 3s grace period
+            if (wait_elapsed > 3000000) {
+                ctx->freq_matched = game_check_freq_match(player_freq,
+                                        ctx->target.frequency, FREQ_TOLERANCE);
+                ctx->amp_matched = game_check_amp_match(player_amp,
+                                        ctx->target.amplitude, AMP_TOLERANCE);
+
+                if (ctx->freq_matched && ctx->amp_matched) {
+                    if (ctx->lock_start_us == 0) {
+                        ctx->lock_start_us = now_us;
+                    }
+                    if (now_us - ctx->lock_start_us >= LOCK_DURATION_US) {
+                        ctx->strikes++;
+                        ctx->rounds_won++;
+                        event = 1;
+                        led_set_color(255, 0, 0);
+                        sleep_ms(300);
+                        ctx->state = WAVE_RESET;
+                        ctx->lock_start_us = 0;
+                    }
+                } else {
+                    ctx->lock_start_us = 0;
+                }
+            }
+            break;
+        }
+
         case WAVE_COMPLETE:
-            // Stay here forever — module is done
             break;
 
         default:
@@ -152,9 +218,12 @@ void game_reset_idle(game_ctx_t *ctx) {
     ctx->state = WAVE_IDLE;
     ctx->lock_start_us = 0;
     ctx->play_start_us = 0;
+    ctx->wait_start_us = 0;
     ctx->freq_matched = false;
     ctx->amp_matched = false;
-    // Reset dead-zone tracking so IDLE re-captures current pot position
     initial_freq = -1.0f;
     initial_amp = -1.0f;
+    prev_freq = -1.0f;
+    prev_amp = -1.0f;
+    stable_since_us = 0;
 }

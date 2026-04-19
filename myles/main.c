@@ -132,6 +132,13 @@ int main(void) {
                 prev_player_y[i] = PLOT_CENTER_Y;
         }
 
+        // WAIT state: keep showing player wave so oversolve is possible
+        if (game_ctx.state == WAVE_WAIT) {
+            memcpy(prev_player_y, player_y, sizeof(player_y));
+            wave_compute(player_y, freq, amp, PLOT_CENTER_Y, WAVE_WIDTH);
+            wave_draw_player(prev_player_y, player_y);
+        }
+
         if (game_ctx.state == WAVE_PLAYING) {
             memcpy(prev_player_y, player_y, sizeof(player_y));
             wave_compute(player_y, freq, amp, PLOT_CENTER_Y, WAVE_WIDTH);
