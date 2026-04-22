@@ -33,6 +33,7 @@ const int SPI_DISP_TX  = 31;
 #define SERVO_MAX_US    2500  // Pulse width for 180°
 #define SERVO_RANGE_DEG 180
 
+<<<<<<< HEAD
 // //rfid
 // #define MFRC522_SPI spi0
 // #define PIN_MISO 4
@@ -40,6 +41,15 @@ const int SPI_DISP_TX  = 31;
 // #define PIN_SCK  6
 // #define PIN_MOSI 7
 // #define PIN_RST  8
+=======
+//rfid
+#define MFRC522_SPI spi1
+#define PIN_MISO 40
+#define PIN_CS   41
+#define PIN_SCK  42
+#define PIN_MOSI 43
+#define PIN_RST  44
+>>>>>>> 9082b228a475cfdf35fd9e30da70da4e44fd6e51
 
 static uint servo_slice;
 static uint servo_channel;
@@ -68,6 +78,7 @@ volatile bool module_complete = false; // Module complete flag
 extern char font[];
 bool is_at_180 = false;
 
+<<<<<<< HEAD
 // static void rfid_spi_init(void) {
 //     // 1 MHz is a stable speed for the RC522
 //     spi_init(MFRC522_SPI, 1000 * 1000);
@@ -87,6 +98,22 @@ bool is_at_180 = false;
 //     gpio_set_dir(PIN_RST, GPIO_OUT);
 //     gpio_put(PIN_RST, 1); // Take out of reset
 // }
+=======
+
+void simon_says_init(void) {
+    gpio_init(SS_LED_RED);    gpio_set_dir(SS_LED_RED,    GPIO_OUT); gpio_put(SS_LED_RED,    0);
+    gpio_init(SS_LED_GREEN);  gpio_set_dir(SS_LED_GREEN,  GPIO_OUT); gpio_put(SS_LED_GREEN,  0);
+    gpio_init(SS_LED_BLUE);   gpio_set_dir(SS_LED_BLUE,   GPIO_OUT); gpio_put(SS_LED_BLUE,   0);
+    gpio_init(SS_LED_YELLOW); gpio_set_dir(SS_LED_YELLOW, GPIO_OUT); gpio_put(SS_LED_YELLOW, 0);
+
+    gpio_init(SS_BTN_RED);    gpio_set_dir(SS_BTN_RED,    GPIO_IN); gpio_pull_down(SS_BTN_RED);
+    gpio_init(SS_BTN_GREEN);  gpio_set_dir(SS_BTN_GREEN,  GPIO_IN); gpio_pull_up(SS_BTN_GREEN);
+    gpio_init(SS_BTN_BLUE);   gpio_set_dir(SS_BTN_BLUE,   GPIO_IN); gpio_pull_up(SS_BTN_BLUE);
+    gpio_init(SS_BTN_YELLOW); gpio_set_dir(SS_BTN_YELLOW, GPIO_IN); gpio_pull_up(SS_BTN_YELLOW);
+    gpio_set_irq_enabled_with_callback(SS_BTN_RED, GPIO_IRQ_EDGE_RISE, true, &irq_callback);
+
+}
+>>>>>>> 9082b228a475cfdf35fd9e30da70da4e44fd6e51
 
 static void servo_init(void) {
     gpio_set_function(SERVO_PIN, GPIO_FUNC_PWM);
@@ -133,8 +160,10 @@ void irq_callback(uint gpio, uint32_t events) {
     if(gpio == BUTTON_PIN && (events & GPIO_IRQ_EDGE_FALL)){
         button_isr();
     }
-    if (gpio == SS_BTN_RED && (events & GPIO_IRQ_EDGE_RISE)){
+    if (gpio == SS_BTN_RED && (events & GPIO_IRQ_EDGE_FALL)){
+        printf("ss pressed\n");
         run_simon_says();
+        
     }
 
     busy_wait_ms(500); // Debounce delay
@@ -161,7 +190,7 @@ void reset_isr() {
     cd_display1("Simon Says!     ");
     cd_display2("Press to start  ");
     printf("Char display done\n");
-
+    
     // 1. Pick a random color
     uint32_t button_type = get_rand_32() % 10;
     current_r = (button_type % 5 == 0 || button_type % 5 == 3 || button_type % 5 == 4); //red, green, blue, yellow, white
@@ -223,55 +252,30 @@ void reset_init(){
 
 int main() {
     stdio_init_all();
-    //sleep_ms(2000);
 
-
+    init_chardisp_pins();
 
     init_sevenseg_spi();
     init_sevenseg_dma();
+    //cd_init();
     reset_init();
     button_init();
     rgb_init();
-    // servo_init();
-    // rfid_spi_init();
-    simon_says_init();
-    init_chardisp_pins();
-    cd_init();
+    //servo_init();
+    //simon_says_init();
+
 
     init_hardware_timer(); 
 
     char display_buffer[9]; 
 
-    // servo_set_angle(0);
+    // // servo_set_angle(0);
     // MFRC522Ptr_t mfrc = MFRC522_Init(); 
-    // PCD_Init(mfrc, spi0);
+    // PCD_Init(mfrc, MFRC522_SPI);
+        
     // bool is_open = false;
 
     for(;;) {
-        // if (PICC_IsNewCardPresent(mfrc)) {
-        //     // Attempt to read the card serial
-        //     if (PICC_ReadCardSerial(mfrc)) {
-        //         printf("Successful Scan! Tag ID: ");
-        //         for (uint8_t i = 0; i < mfrc->uid.size; i++) {
-        //             printf("%02X", mfrc->uid.uidByte[i]);
-        //         }
-        //         printf("\n");
-
-        //         // Toggle Servo
-        //         if (is_open) {
-        //             servo_set_angle(0);
-        //             printf("Servo reset to 0 degrees\n");
-        //         } else {
-        //             servo_set_angle(180);
-        //             printf("Servo turned to 180 degrees\n");
-        //         }
-        //         is_open = !is_open;
-
-        //         // Delay to avoid multiple triggers from one tap
-        //         sleep_ms(2000);
-        //         printf("Waiting for next scan...\n");
-        //     }
-        // }
         if (update_display) {
             int mins = countdown_secs / 60;
             int secs = countdown_secs % 60;
@@ -280,6 +284,23 @@ int main() {
             sevenseg_display(display_buffer);
             update_display = false;
         }
+        // if (PICC_IsNewCardPresent(mfrc)) {
+        //     printf("Card detected!\n");
+        //     // Attempt to read the card serial
+        //     if (PICC_ReadCardSerial(mfrc)) {
+        //         printf("RFID Card Scanned! Tag ID: ");
+        //         for (uint8_t i = 0; i < mfrc->uid.size; i++) {
+        //             printf("%02X", mfrc->uid.uidByte[i]);
+        //         }
+        //         printf("\n");
+
+        //         // Delay to avoid multiple triggers from one tap
+        //         sleep_ms(2000);
+        //         printf("Ready for next scan...\n");
+        //     } else {
+        //         printf("Failed to read card serial\n");
+        //     } 
+        // }
         sleep_ms(100);
         
     }
