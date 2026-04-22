@@ -3,7 +3,7 @@
 #include "pico/stdlib.h"
 #include "timer.h"
 #include "button.h"
-#include "mfrc522.h" 
+// #include "mfrc522.h"
 #include "chardisp.h"
 #include "simon_says.h"
 
@@ -33,13 +33,13 @@ const int SPI_DISP_TX  = 31;
 #define SERVO_MAX_US    2500  // Pulse width for 180°
 #define SERVO_RANGE_DEG 180
 
-//rfid
-#define MFRC522_SPI spi0
-#define PIN_MISO 4
-#define PIN_CS   5
-#define PIN_SCK  6
-#define PIN_MOSI 7
-#define PIN_RST  8
+// //rfid
+// #define MFRC522_SPI spi0
+// #define PIN_MISO 4
+// #define PIN_CS   5
+// #define PIN_SCK  6
+// #define PIN_MOSI 7
+// #define PIN_RST  8
 
 static uint servo_slice;
 static uint servo_channel;
@@ -68,25 +68,25 @@ volatile bool module_complete = false; // Module complete flag
 extern char font[];
 bool is_at_180 = false;
 
-static void rfid_spi_init(void) {
-    // 1 MHz is a stable speed for the RC522
-    spi_init(MFRC522_SPI, 1000 * 1000); 
-    
-    // Assign SPI functions to the pins
-    gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
-    gpio_set_function(PIN_SCK,  GPIO_FUNC_SPI);
-    gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
-    
-    // Initialize Chip Select (CS/SDA) as a standard GPIO output
-    gpio_init(PIN_CS);
-    gpio_set_dir(PIN_CS, GPIO_OUT);
-    gpio_put(PIN_CS, 1); // Deselect chip by default (active low)
-    
-    // Initialize Reset pin
-    gpio_init(PIN_RST);
-    gpio_set_dir(PIN_RST, GPIO_OUT);
-    gpio_put(PIN_RST, 1); // Take out of reset
-}
+// static void rfid_spi_init(void) {
+//     // 1 MHz is a stable speed for the RC522
+//     spi_init(MFRC522_SPI, 1000 * 1000);
+//
+//     // Assign SPI functions to the pins
+//     gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
+//     gpio_set_function(PIN_SCK,  GPIO_FUNC_SPI);
+//     gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
+//
+//     // Initialize Chip Select (CS/SDA) as a standard GPIO output
+//     gpio_init(PIN_CS);
+//     gpio_set_dir(PIN_CS, GPIO_OUT);
+//     gpio_put(PIN_CS, 1); // Deselect chip by default (active low)
+//
+//     // Initialize Reset pin
+//     gpio_init(PIN_RST);
+//     gpio_set_dir(PIN_RST, GPIO_OUT);
+//     gpio_put(PIN_RST, 1); // Take out of reset
+// }
 
 static void servo_init(void) {
     gpio_set_function(SERVO_PIN, GPIO_FUNC_PWM);
