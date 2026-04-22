@@ -1,8 +1,13 @@
+#include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
 #include "hardware/gpio.h"
 #include "hardware/dma.h"
+#include "hardware/pwm.h"
+#include "hardware/timer.h"
+#include "timer.h"
 #include "button.h"
+
 void rgb_init() {
     // 1. Tell the pins to use the PWM hardware
     gpio_set_function(RED_PIN, GPIO_FUNC_PWM);

@@ -14,7 +14,7 @@
 #define CORRECT_LED 33
 
 // LED Control Constants
-#define BRIGHTNESS 50
+#define BRIGHTNESS 20
 #define OFF_LEVEL 255
 #define BLINK_LEVEL (255 - BRIGHTNESS + 30)
 #define ON_LEVEL (255 - BRIGHTNESS)

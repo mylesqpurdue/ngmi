@@ -1,0 +1,19 @@
+#pragma once
+#include "hardware/spi.h"
+
+// SPI0 pins — defined as const int in main.c
+extern const int SPI_DISP_SCK;
+extern const int SPI_DISP_CSn;
+extern const int SPI_DISP_TX;
+
+// Configure SPI0 pins and init the LCD controller.
+void init_chardisp_pins(void);
+void cd_init(void);
+
+// Write exactly 16 characters to line 1 or line 2.
+void cd_display1(const char *str);
+void cd_display2(const char *str);
+
+// Low-level helpers (used internally).
+void send_spi_cmd(spi_inst_t *spi, uint16_t value);
+void send_spi_data(spi_inst_t *spi, uint16_t value);
