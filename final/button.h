@@ -39,7 +39,6 @@ void apply_led_state(bool force_on);
 bool led_blink_callback(struct repeating_timer *t);
 int get_required_digit(void);
 bool time_contains_digit(int digit);
-void button_isr(void);
 void button_init(void);
 void irq_callback(uint gpio, uint32_t events);
 void reset_isr(void);

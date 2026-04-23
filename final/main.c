@@ -20,10 +20,15 @@ const int SPI_DISP_SCK = 22;
 const int SPI_DISP_CSn = 21;
 const int SPI_DISP_TX  = 23;
 
+#define STRIKE1 26
+#define STRIKE2 27
+#define STRIKE3 28
 // 7-seg functions from display.c
 void init_sevenseg_spi(void);
 void init_sevenseg_dma(void);
 void sevenseg_display(const char *str);
+void button_isr(void);
+void update_strike_leds();
 
 // ─── Variables required by button.h ──────────────────────────────────────────
 struct repeating_timer blink_timer;
@@ -43,6 +48,38 @@ static const char letters[9] = {'A', 'C', 'E', 'F', 'H', 'J', 'L', 'P', 'U'};
 
 extern char font[];
 
+//strike leds
+void init_strike_leds(){
+    gpio_init(STRIKE1);
+    gpio_init(STRIKE2);
+    gpio_init(STRIKE3);
+
+    gpio_set_dir(STRIKE1, true);
+    gpio_set_dir(STRIKE2, true);
+    gpio_set_dir(STRIKE3, true);
+
+
+}
+void update_strike_leds(){
+    switch (strike_count) {
+        case 0:
+            gpio_put(STRIKE1, 0);
+            gpio_put(STRIKE2, 0);
+            gpio_put(STRIKE3, 0);
+            break;
+        case 1: 
+            gpio_put(STRIKE1, 1);
+            break;
+        case 2: 
+            gpio_put(STRIKE2, 1);
+            break;
+        case 3: 
+            gpio_put(STRIKE3, 1);
+            break;
+        default:
+            break;
+    }
+}
 // ─── Serial code generation ───────────────────────────────────────────────────
 static void generate_serial_code(void) {
     uint32_t r;
@@ -61,6 +98,28 @@ void irq_callback(uint gpio, uint32_t events) {
         button_isr();
     busy_wait_ms(500);
 }
+void button_isr() {
+    if (module_complete) return;
+
+    int required_digit = get_required_digit();
+    int mins = countdown_secs / 60;
+    int secs = countdown_secs % 60;
+
+    if (time_contains_digit(required_digit)) {
+        gpio_put(CORRECT_LED, 1);
+        current_r = 0;
+        current_g = 0;
+        current_b = 0;
+        apply_led_state(true);
+        module_complete = true;
+        printf("Module complete!\n");
+    } else {
+        strike_count++;
+        update_strike_leds();
+        printf("Strike %d! Required digit: %d, Time was %d:%02d\n",
+               strike_count, required_digit, mins, secs);
+    }
+}
 
 // ─── Reset ISR — arms the game ────────────────────────────────────────────────
 void reset_isr(void) {
@@ -68,6 +127,7 @@ void reset_isr(void) {
     timer_active    = true;
     update_display  = true;
     strike_count    = 0;
+    update_strike_leds();
     module_complete = false;
     gpio_put(CORRECT_LED, 0);
     cancel_repeating_timer(&blink_timer);
@@ -138,6 +198,7 @@ int main(void) {
     button_init();
     rgb_init();
     init_hardware_timer();
+    init_strike_leds();
 
     // Alexia's hardware
     simon_says_init();
@@ -187,6 +248,8 @@ int main(void) {
 
         if (!simon_says_collect_input(6)) {
             if (countdown_secs <= 0) goto exploded;
+            strike_count++;
+            update_strike_leds();
             cd_display1("Wrong! Strike!  ");
             snprintf(strike_line, sizeof(strike_line), "Strikes: %d      ", strike_count);
             cd_display2(strike_line);

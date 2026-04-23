@@ -81,27 +81,7 @@ bool time_contains_digit(int digit) {
     return (mins == digit) || (secs % 10 == digit) || (secs / 10 == digit);
 }
 
-void button_isr() {
-    if (module_complete) return;
 
-    int required_digit = get_required_digit();
-    int mins = countdown_secs / 60;
-    int secs = countdown_secs % 60;
-
-    if (time_contains_digit(required_digit)) {
-        gpio_put(CORRECT_LED, 1);
-        current_r = 0;
-        current_g = 0;
-        current_b = 0;
-        apply_led_state(true);
-        module_complete = true;
-        printf("Module complete!\n");
-    } else {
-        strike_count++;
-        printf("Strike %d! Required digit: %d, Time was %d:%02d\n",
-               strike_count, required_digit, mins, secs);
-    }
-}
 
 void button_init() {
     gpio_init(BUTTON_PIN);
