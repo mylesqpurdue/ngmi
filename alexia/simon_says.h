@@ -5,16 +5,16 @@
 
 // ─── Pin Assignments ─────────────────────────────────────────────────────────
 // LEDs (output)
+#define SS_LED_BLUE   9
 #define SS_LED_RED    8
-#define SS_LED_YELLOW 7
-#define SS_LED_GREEN  6
-#define SS_LED_BLUE   5
+#define SS_LED_GREEN  5
+#define SS_LED_YELLOW 2
 
 // Buttons (input, active-low with internal pull-up)
-#define SS_BTN_RED    12
-#define SS_BTN_YELLOW 11
-#define SS_BTN_GREEN  10
-#define SS_BTN_BLUE   9
+#define SS_BTN_BLUE   36
+#define SS_BTN_RED    38
+#define SS_BTN_GREEN  40
+#define SS_BTN_YELLOW 42
 
 // ─── Game parameters ─────────────────────────────────────────────────────────
 #define SS_MAX_ROUNDS    8    // rounds needed to solve the module
