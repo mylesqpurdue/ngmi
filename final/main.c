@@ -299,6 +299,8 @@ int main(void) {
             if (countdown_secs <= 0) goto exploded;
             cd_display1("Wrong! Strike!  ");
             snprintf(strike_line, sizeof(strike_line), "Strikes: %d      ", strike_count);
+            strike_count++;
+            update_strike_leds();
             cd_display2(strike_line);
             ss_strike_flash();
             sleep_ms(1500);

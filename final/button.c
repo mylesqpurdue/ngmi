@@ -68,10 +68,21 @@ int get_required_digit() {
     bool is_blue   = !current_r && !current_g && current_b;
     bool is_yellow = current_r && current_g && !current_b;
 
-    if (is_green && parity == 0)    return 5;
-    if (is_blue && is_blinking)     return 2;
-    if (is_red && strike_count == 1) return 3;
-    if (is_yellow && parity == 1)   return 8;
+    // --- New rules first if they are more specific ---
+
+    if (is_green && is_blinking && strike_count == 0) return 0;
+    if (is_red && parity == 1)                        return 1;
+    if (is_red && is_blinking && strike_count >= 2)   return 9;
+    if (is_yellow && is_blinking)                     return 7;
+    if (is_blue && parity == 0)                       return 6;
+
+    // --- Original rules ---
+    if (is_green && parity == 0)                      return 5;
+    if (is_blue && is_blinking)                       return 2;
+    if (is_red && strike_count == 1)                  return 3;
+    if (is_yellow && parity == 1)                     return 8;
+
+    // --- Default ---
     return 4;
 }
 
