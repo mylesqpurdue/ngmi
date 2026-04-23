@@ -152,7 +152,7 @@ void reset_isr(void) {
 static void reset_init(void) {
     gpio_init(RESET_PIN);
     gpio_set_dir(RESET_PIN, GPIO_IN);
-    gpio_disable_pulls(RESET_PIN);
+    gpio_pull_up(RESET_PIN);
     gpio_set_irq_enabled_with_callback(RESET_PIN, GPIO_IRQ_EDGE_FALL, true, &irq_callback);
 }
 
