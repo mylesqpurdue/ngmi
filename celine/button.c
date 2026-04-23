@@ -76,8 +76,6 @@ int get_required_digit() {
     bool is_green = !current_r && current_g && !current_b;
     bool is_blue = !current_r && !current_g && current_b;
     bool is_yellow = current_r && current_g && !current_b;
-    bool is_white = current_r && current_g && current_b;
-    
     // Green and even parity → digit 5
     if (is_green && parity == 0) {
         return 5;

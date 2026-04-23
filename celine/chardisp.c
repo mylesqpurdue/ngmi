@@ -12,13 +12,8 @@ void init_chardisp_pins(void) {
     gpio_set_function(SPI_DISP_CSn, GPIO_FUNC_SPI);
     gpio_set_function(SPI_DISP_TX,  GPIO_FUNC_SPI);
 
-<<<<<<< HEAD
-    spi_init(spi0, 10000);
-    spi_set_format(spi0, 9, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
-=======
     spi_init(spi1, 10000);
     spi_set_format(spi1, 9, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
->>>>>>> 9082b228a475cfdf35fd9e30da70da4e44fd6e51
 }
 
 void send_spi_cmd(spi_inst_t *spi, uint16_t value) {
@@ -33,15 +28,6 @@ void send_spi_data(spi_inst_t *spi, uint16_t value) {
 
 void cd_init(void) {
     sleep_ms(1);
-<<<<<<< HEAD
-    send_spi_cmd(spi0, 0x38);   // function set
-    sleep_us(40);
-    send_spi_cmd(spi0, 0x0C);   // display on, cursor off
-    sleep_us(40);
-    send_spi_cmd(spi0, 0x01);   // clear screen
-    sleep_ms(2);
-    send_spi_cmd(spi0, 0x06);   // entry mode: cursor moves right
-=======
     send_spi_cmd(spi1, 0x38);   // function set
     sleep_us(40);
     send_spi_cmd(spi1, 0x0C);   // display on, cursor off
@@ -49,31 +35,17 @@ void cd_init(void) {
     send_spi_cmd(spi1, 0x01);   // clear screen
     sleep_ms(2);
     send_spi_cmd(spi1, 0x06);   // entry mode: cursor moves right
->>>>>>> 9082b228a475cfdf35fd9e30da70da4e44fd6e51
     sleep_us(40);
 }
 
 void cd_display1(const char *str) {
-<<<<<<< HEAD
-    send_spi_cmd(spi0, 0x80);   // DDRAM address 0x00 = line 1
-    for (int i = 0; i < 16; i++)
-        send_spi_data(spi0, (uint16_t)str[i]);
-}
-
-void cd_display2(const char *str) {
-    send_spi_cmd(spi0, 0xC0);   // DDRAM address 0x40 = line 2
-    for (int i = 0; i < 16; i++)
-        send_spi_data(spi0, (uint16_t)str[i]);
-=======
     send_spi_cmd(spi1, 0x80);   // DDRAM address 0x00 = line 1
     for (int i = 0; i < 16; i++)
         send_spi_data(spi1, (uint16_t)str[i]);
-
 }
 
 void cd_display2(const char *str) {
     send_spi_cmd(spi1, 0xC0);   // DDRAM address 0x40 = line 2
     for (int i = 0; i < 16; i++)
         send_spi_data(spi1, (uint16_t)str[i]);
->>>>>>> 9082b228a475cfdf35fd9e30da70da4e44fd6e51
 }

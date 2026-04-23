@@ -22,7 +22,7 @@ uint16_t __attribute__((aligned(16))) message[8] = {
 void sevenseg_display(const char* str) {
     for(int i = 0; (i < 8); i ++){
     if (str[i] != '\0') {
-        message[i] = (i << 8) | font[str[i]];
+        message[i] = (i << 8) | font[(unsigned char)str[i]];
     } else {
         message[i] = 0;  // clear unused digits
     }
@@ -44,8 +44,8 @@ void init_sevenseg_spi() {
 }
 
 void init_sevenseg_dma() {
-    dma_hw->ch[1].read_addr = message;
-    dma_hw->ch[1].write_addr = &spi1_hw->dr;
+    dma_hw->ch[1].read_addr = (uintptr_t)message;
+    dma_hw->ch[1].write_addr = (uintptr_t)&spi1_hw->dr;
     dma_hw->ch[1].transfer_count = (DMA_CH1_TRANS_COUNT_MODE_VALUE_TRIGGER_SELF << DMA_CH1_TRANS_COUNT_MODE_LSB) | (8 << DMA_CH1_TRANS_COUNT_COUNT_LSB);
 
     uint32_t temp = 0;

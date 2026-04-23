@@ -33,28 +33,13 @@ const int SPI_DISP_TX  = 31;
 #define SERVO_MAX_US    2500  // Pulse width for 180°
 #define SERVO_RANGE_DEG 180
 
-<<<<<<< HEAD
 // //rfid
-// #define MFRC522_SPI spi0
-// #define PIN_MISO 4
-// #define PIN_CS   5
-// #define PIN_SCK  6
-// #define PIN_MOSI 7
-// #define PIN_RST  8
-=======
-//rfid
-#define MFRC522_SPI spi1
-#define PIN_MISO 40
-#define PIN_CS   41
-#define PIN_SCK  42
-#define PIN_MOSI 43
-#define PIN_RST  44
->>>>>>> 9082b228a475cfdf35fd9e30da70da4e44fd6e51
-
-static uint servo_slice;
-static uint servo_channel;
-
-
+// #define MFRC522_SPI spi1
+// #define PIN_MISO 40
+// #define PIN_CS   41
+// #define PIN_SCK  42
+// #define PIN_MOSI 43
+// #define PIN_RST  44
 
 void init_sevenseg_spi();
 void init_sevenseg_dma();
@@ -78,27 +63,6 @@ volatile bool module_complete = false; // Module complete flag
 extern char font[];
 bool is_at_180 = false;
 
-<<<<<<< HEAD
-// static void rfid_spi_init(void) {
-//     // 1 MHz is a stable speed for the RC522
-//     spi_init(MFRC522_SPI, 1000 * 1000);
-//
-//     // Assign SPI functions to the pins
-//     gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
-//     gpio_set_function(PIN_SCK,  GPIO_FUNC_SPI);
-//     gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
-//
-//     // Initialize Chip Select (CS/SDA) as a standard GPIO output
-//     gpio_init(PIN_CS);
-//     gpio_set_dir(PIN_CS, GPIO_OUT);
-//     gpio_put(PIN_CS, 1); // Deselect chip by default (active low)
-//
-//     // Initialize Reset pin
-//     gpio_init(PIN_RST);
-//     gpio_set_dir(PIN_RST, GPIO_OUT);
-//     gpio_put(PIN_RST, 1); // Take out of reset
-// }
-=======
 
 void simon_says_init(void) {
     gpio_init(SS_LED_RED);    gpio_set_dir(SS_LED_RED,    GPIO_OUT); gpio_put(SS_LED_RED,    0);
@@ -106,35 +70,13 @@ void simon_says_init(void) {
     gpio_init(SS_LED_BLUE);   gpio_set_dir(SS_LED_BLUE,   GPIO_OUT); gpio_put(SS_LED_BLUE,   0);
     gpio_init(SS_LED_YELLOW); gpio_set_dir(SS_LED_YELLOW, GPIO_OUT); gpio_put(SS_LED_YELLOW, 0);
 
-    gpio_init(SS_BTN_RED);    gpio_set_dir(SS_BTN_RED,    GPIO_IN); gpio_pull_down(SS_BTN_RED);
+    gpio_init(SS_BTN_RED);    gpio_set_dir(SS_BTN_RED,    GPIO_IN); gpio_pull_up(SS_BTN_RED);
     gpio_init(SS_BTN_GREEN);  gpio_set_dir(SS_BTN_GREEN,  GPIO_IN); gpio_pull_up(SS_BTN_GREEN);
     gpio_init(SS_BTN_BLUE);   gpio_set_dir(SS_BTN_BLUE,   GPIO_IN); gpio_pull_up(SS_BTN_BLUE);
     gpio_init(SS_BTN_YELLOW); gpio_set_dir(SS_BTN_YELLOW, GPIO_IN); gpio_pull_up(SS_BTN_YELLOW);
-    gpio_set_irq_enabled_with_callback(SS_BTN_RED, GPIO_IRQ_EDGE_RISE, true, &irq_callback);
-
-}
->>>>>>> 9082b228a475cfdf35fd9e30da70da4e44fd6e51
-
-static void servo_init(void) {
-    gpio_set_function(SERVO_PIN, GPIO_FUNC_PWM);
-    servo_slice   = pwm_gpio_to_slice_num(SERVO_PIN);
-    servo_channel = pwm_gpio_to_channel(SERVO_PIN);
-    
-    // Set clock divider so 1 tick = 1 microsecond (assuming 125MHz sys_clk)
-    pwm_set_clkdiv(servo_slice, 125.0f);
-    // Wrap at 20,000 ticks for a 20ms period (50Hz)
-    pwm_set_wrap(servo_slice, SERVO_PERIOD_US - 1);
-    pwm_set_enabled(servo_slice, true);
+    gpio_set_irq_enabled_with_callback(SS_BTN_RED, GPIO_IRQ_EDGE_FALL, true, &irq_callback);
 }
 
-static void servo_set_angle(uint16_t angle_deg) {
-    if (angle_deg > SERVO_RANGE_DEG) angle_deg = SERVO_RANGE_DEG;
-    
-    uint16_t pulse_us = SERVO_MIN_US + 
-        (uint32_t)(SERVO_MAX_US - SERVO_MIN_US) * angle_deg / SERVO_RANGE_DEG;
-        
-    pwm_set_chan_level(servo_slice, servo_channel, pulse_us);
-}
 
 void generate_serial_code() {
     uint32_t rand_val = get_rand_32();
@@ -253,7 +195,7 @@ void reset_init(){
 int main() {
     stdio_init_all();
 
-    init_chardisp_pins();
+    //init_chardisp_pins();
 
     init_sevenseg_spi();
     init_sevenseg_dma();
@@ -267,7 +209,7 @@ int main() {
 
     init_hardware_timer(); 
 
-    char display_buffer[9]; 
+    char display_buffer[16];
 
     // // servo_set_angle(0);
     // MFRC522Ptr_t mfrc = MFRC522_Init(); 
