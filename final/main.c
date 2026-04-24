@@ -277,7 +277,6 @@ int main(void) {
         }
 
         // ── ACTIVE: game is armed ────────────────────────────────────────────
-        bool simon_done = false;
 
         // ── Round 1: Regular Simon Says ──────────────────────────────────────
         cd_display1("- Round 1 -     ");
@@ -361,7 +360,6 @@ int main(void) {
         }
 
         if (BOMB_DEAD()) goto exploded;
-        simon_done = true;
 
         // ── Simon done — wait for button + KRISH + MYLES ──────────────────────
         if (module_complete && krish_solved && myles_solved) goto defused;
