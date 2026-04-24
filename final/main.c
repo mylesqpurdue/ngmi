@@ -13,6 +13,7 @@
 #include "simon_says.h"
 #include "chardisp.h"
 #include "peer_link.h"
+#include "audio.h"
 #include "pico/multicore.h"
 
 // LCD on SPI0 — pins chosen to avoid all other hardware
@@ -190,8 +191,13 @@ static void update_sevenseg(void) {
 static void core1_entry(void) {
     peer_link_init();
     peer_event_t evt;
+    uint32_t last_time_ms = to_ms_since_boot(get_absolute_time());
 
     while (1) {
+        uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+        uint32_t dt_ms = now_ms - last_time_ms;
+        last_time_ms = now_ms;
+
         if (update_display)
             update_sevenseg();
 
@@ -208,6 +214,17 @@ static void core1_entry(void) {
                 }
             }
         }
+
+        audio_state_t a_state = AUDIO_STATE_IDLE;
+        if (module_complete && krish_solved && myles_solved) {
+            a_state = AUDIO_STATE_DEFUSED;
+        } else if (countdown_secs <= 0 || strike_count >= 3) {
+            a_state = AUDIO_STATE_BOOM;
+        } else if (timer_active) {
+            a_state = AUDIO_STATE_TICKING;
+        }
+
+        audio_tick(a_state, dt_ms);
 
         sleep_ms(10);
     }
@@ -245,6 +262,7 @@ int main(void) {
     simon_says_init();
     init_chardisp_pins();
     cd_init();
+    audio_init();
 
     multicore_launch_core1(core1_entry);
 
