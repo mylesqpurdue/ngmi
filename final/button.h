@@ -30,7 +30,7 @@ extern volatile bool current_b;
 extern volatile bool module_complete;
 extern volatile int countdown_secs;
 extern int parity;
-extern int strike_count;
+extern volatile int strike_count;
 
 // Function declarations
 void rgb_init(void);

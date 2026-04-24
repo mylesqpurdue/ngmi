@@ -378,7 +378,8 @@ int main(void) {
         gpio_put(SS_LED_RED, 1); gpio_put(SS_LED_GREEN, 1);
         gpio_put(SS_LED_BLUE, 1); gpio_put(SS_LED_YELLOW, 1);
         timer_active = false;
-        for (;;);
+        while (!timer_active) sleep_ms(100);
+        continue;
 
         exploded:
         cd_display1("** BOOM! **     ");
@@ -391,7 +392,9 @@ int main(void) {
             gpio_put(SS_LED_BLUE, 0); gpio_put(SS_LED_YELLOW, 0);
             sleep_ms(100);
         }
-        for (;;);
+        timer_active = false;
+        while (!timer_active) sleep_ms(100);
+        continue;
     }
 
     return 0;
