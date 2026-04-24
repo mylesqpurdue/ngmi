@@ -7,6 +7,7 @@ add_executable(myles_board
     inputs.c
     led.c
     game.c
+    audio.c
 )
 
 target_include_directories(myles_board PRIVATE

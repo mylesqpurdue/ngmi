@@ -7,6 +7,7 @@
 #include "waves.h"
 #include "led.h"
 #include "game.h"
+#include "audio.h"
 
 // Quick LED pin test — comment out to return to game
 // LED test done — back to game mode
@@ -77,6 +78,7 @@ int main(void) {
     display_init();
     inputs_init();
     led_init();
+    audio_init();
     game_init(&game_ctx);
 
     prime_idle();
@@ -112,6 +114,9 @@ int main(void) {
 
         if (event == 1) printf("$STRIKE\n");
         if (event == 2) printf("$SOLVED:MYLES\n");
+
+        // Drive audio — pass current state every frame
+        audio_tick(game_ctx.state, 33);
 
         if (game_ctx.state == WAVE_IDLE) {
             if (now_ms - blink_toggle_ms >= 500) {
