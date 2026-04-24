@@ -192,31 +192,43 @@ int game_update(game_ctx_t *ctx, float player_freq, float player_amp,
                 break;
             }
 
-            // Oversolve check — only after 3s grace period
-            if (wait_elapsed > 3000000) {
-                ctx->freq_matched = game_check_freq_match(player_freq,
-                                        ctx->target.frequency, FREQ_TOLERANCE);
-                ctx->amp_matched = game_check_amp_match(player_amp,
-                                        ctx->target.amplitude, AMP_TOLERANCE);
+            // Oversolve check: player must leave the match zone first, then
+            // come back, to count as an oversolve attempt. This prevents the
+            // natural "player finishes and sits still" case from being
+            // flagged as a strike.
+            //
+            // ctx->freq_matched / amp_matched here act as a "has been outside"
+            // latch: we only arm oversolve detection once the player has been
+            // seen OUT of the match zone.
+            bool currently_matched =
+                game_check_freq_match(player_freq, ctx->target.frequency, FREQ_TOLERANCE) &&
+                game_check_amp_match(player_amp,  ctx->target.amplitude, AMP_TOLERANCE);
 
-                if (ctx->freq_matched && ctx->amp_matched) {
-                    if (ctx->lock_start_us == 0) {
-                        ctx->lock_start_us = now_us;
-                    }
-                    if (now_us - ctx->lock_start_us >= LOCK_DURATION_US) {
-                        ctx->strikes++;
-                        ctx->rounds_won++;
-                        event = 1;
-                        led_set_color(255, 0, 0);
-                        ctx->flash_start_us = now_us;
-                        ctx->flash_duration_us = 300000;
-                        ctx->pending_state = WAVE_RESET;
-                        ctx->state = WAVE_FLASH_STRIKE;
-                        ctx->lock_start_us = 0;
-                    }
-                } else {
+            if (!currently_matched) {
+                // Player has moved off the target. Arm oversolve detection.
+                ctx->freq_matched = false;
+                ctx->amp_matched  = false;
+            } else if (!ctx->freq_matched && !ctx->amp_matched && wait_elapsed > 3000000) {
+                // Only AFTER the player has been seen outside the match zone
+                // AND 3 seconds of grace have passed, do we count coming back
+                // onto the target as an oversolve.
+                if (ctx->lock_start_us == 0) {
+                    ctx->lock_start_us = now_us;
+                }
+                if (now_us - ctx->lock_start_us >= LOCK_DURATION_US) {
+                    // Genuine oversolve — player actively re-locked after leaving.
+                    // Do NOT increment rounds_won here (that would also bump
+                    // game_rounds_needed via strikes and soft-lock the player).
+                    event = 1;
+                    led_set_color(255, 0, 0);
+                    ctx->flash_start_us = now_us;
+                    ctx->flash_duration_us = 300000;
+                    ctx->pending_state = WAVE_RESET;
+                    ctx->state = WAVE_FLASH_STRIKE;
                     ctx->lock_start_us = 0;
                 }
+            } else {
+                ctx->lock_start_us = 0;
             }
             break;
         }
