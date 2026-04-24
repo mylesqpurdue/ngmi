@@ -20,6 +20,9 @@ void game_init(game_ctx_t *ctx) {
     ctx->win_start_ms = 0;
     ctx->play_start_us = 0;
     ctx->wait_start_us = 0;
+    ctx->flash_start_us = 0;
+    ctx->flash_duration_us = 0;
+    ctx->pending_state = WAVE_IDLE;
     ctx->freq_matched = false;
     ctx->amp_matched = false;
 
@@ -80,8 +83,10 @@ int game_update(game_ctx_t *ctx, float player_freq, float player_amp,
                 ctx->play_start_us = now_us;
                 event = 1;
                 led_set_color(255, 0, 0);
-                sleep_ms(200);
-                led_set_playing();
+                ctx->flash_start_us = now_us;
+                ctx->flash_duration_us = 200000;
+                ctx->pending_state = WAVE_PLAYING;
+                ctx->state = WAVE_FLASH_STRIKE;
             }
 
             // Track pot stability
@@ -146,7 +151,7 @@ int game_update(game_ctx_t *ctx, float player_freq, float player_amp,
         }
 
         case WAVE_RESET:
-            led_flash_white();
+            led_set_color(255, 255, 255);
             game_new_target(&ctx->target);
             ctx->lock_start_us = 0;
             ctx->play_start_us = 0;
@@ -154,7 +159,22 @@ int game_update(game_ctx_t *ctx, float player_freq, float player_amp,
             ctx->amp_matched = false;
             initial_freq = -1.0f;
             initial_amp = -1.0f;
-            ctx->state = WAVE_IDLE;
+            ctx->flash_start_us = now_us;
+            ctx->flash_duration_us = 100000;
+            ctx->pending_state = WAVE_IDLE;
+            ctx->state = WAVE_FLASH_WHITE;
+            break;
+
+        case WAVE_FLASH_STRIKE:
+        case WAVE_FLASH_WHITE:
+            if (now_us - ctx->flash_start_us >= ctx->flash_duration_us) {
+                if (ctx->state == WAVE_FLASH_WHITE) {
+                    led_set_color(0, 0, 0); // End of white flash
+                } else if (ctx->pending_state == WAVE_PLAYING) {
+                    led_set_playing(); // Restore playing color
+                }
+                ctx->state = ctx->pending_state;
+            }
             break;
 
         case WAVE_WAIT: {
@@ -188,8 +208,10 @@ int game_update(game_ctx_t *ctx, float player_freq, float player_amp,
                         ctx->rounds_won++;
                         event = 1;
                         led_set_color(255, 0, 0);
-                        sleep_ms(300);
-                        ctx->state = WAVE_RESET;
+                        ctx->flash_start_us = now_us;
+                        ctx->flash_duration_us = 300000;
+                        ctx->pending_state = WAVE_RESET;
+                        ctx->state = WAVE_FLASH_STRIKE;
                         ctx->lock_start_us = 0;
                     }
                 } else {
@@ -215,6 +237,9 @@ void game_reset_idle(game_ctx_t *ctx) {
     ctx->lock_start_us = 0;
     ctx->play_start_us = 0;
     ctx->wait_start_us = 0;
+    ctx->flash_start_us = 0;
+    ctx->flash_duration_us = 0;
+    ctx->pending_state = WAVE_IDLE;
     ctx->freq_matched = false;
     ctx->amp_matched = false;
     initial_freq = -1.0f;

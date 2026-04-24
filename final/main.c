@@ -12,6 +12,7 @@
 #include "button.h"
 #include "simon_says.h"
 #include "chardisp.h"
+#include "peer_link.h"
 #include "pico/multicore.h"
 
 // LCD on SPI0 — pins chosen to avoid all other hardware
@@ -40,7 +41,11 @@ volatile bool current_b    = false;
 volatile bool module_complete = false;
 
 int parity       = 0;
-int strike_count = 0;
+volatile int strike_count = 0;
+
+// Peer module flags (set by core 1 from UART events)
+volatile bool krish_solved = false;
+volatile bool myles_solved = false;
 
 // Serial code shown on 7-seg display
 char serial_code[4] = "AAA";
@@ -80,6 +85,20 @@ void update_strike_leds(){
             break;
     }
 }
+
+// Cap strikes at 3 and trip the explosion path. Safe from both cores.
+static inline void register_strike(const char *who) {
+    if (strike_count < 3) {
+        strike_count++;
+        update_strike_leds();
+    }
+    printf("[STRIKE] from %s (total %d)\n", who ? who : "?", strike_count);
+    if (strike_count >= 3) {
+        countdown_secs = 0;
+        timer_active = false;
+    }
+}
+
 // ─── Serial code generation ───────────────────────────────────────────────────
 static void generate_serial_code(void) {
     uint32_t r;
@@ -114,8 +133,7 @@ void button_isr() {
         module_complete = true;
         printf("Module complete!\n");
     } else {
-        strike_count++;
-        update_strike_leds();
+        register_strike("BUTTON");
         printf("Strike %d! Required digit: %d, Time was %d:%02d\n",
                strike_count, required_digit, mins, secs);
     }
@@ -129,6 +147,8 @@ void reset_isr(void) {
     strike_count    = 0;
     update_strike_leds();
     module_complete = false;
+    krish_solved    = false;
+    myles_solved    = false;
     gpio_put(CORRECT_LED, 0);
     cancel_repeating_timer(&blink_timer);
     generate_serial_code();
@@ -166,11 +186,29 @@ static void update_sevenseg(void) {
     update_display = false;
 }
 
-// ─── Core 1: continuous timer display ────────────────────────────────────────
+// ─── Core 1: continuous timer display + peer UART drain ──────────────────────
 static void core1_entry(void) {
+    peer_link_init();
+    peer_event_t evt;
+
     while (1) {
         if (update_display)
             update_sevenseg();
+
+        while (peer_link_poll(&evt)) {
+            if (evt.type == PEER_EVT_STRIKE) {
+                register_strike(evt.payload);
+            } else if (evt.type == PEER_EVT_SOLVED) {
+                if (strcmp(evt.payload, "KRISH") == 0) {
+                    krish_solved = true;
+                    printf("[PEER] KRISH solved\n");
+                } else if (strcmp(evt.payload, "MYLES") == 0) {
+                    myles_solved = true;
+                    printf("[PEER] MYLES solved\n");
+                }
+            }
+        }
+
         sleep_ms(10);
     }
 }
@@ -186,6 +224,9 @@ static void ss_strike_flash(void) {
         sleep_ms(200);
     }
 }
+
+// Game-over check shared by every wait loop in main.
+#define BOMB_DEAD() (countdown_secs <= 0 || strike_count >= 3)
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 int main(void) {
@@ -210,6 +251,9 @@ int main(void) {
     char strike_line[17];
 
     while (1) {
+        // Catch stale bomb death (e.g. 3-strike-mid-Simon-fail)
+        if (BOMB_DEAD()) goto exploded;
+
         // ── IDLE: wait for RESET button press ───────────────────────────────
         simon_says_reset();
         cd_display1("Press RESET btn ");
@@ -223,11 +267,14 @@ int main(void) {
         cd_display1("Press RED btn   ");
         cd_display2("to start Simon! ");
         while (gpio_get(SS_BTN_RED)) {
-            if (countdown_secs <= 0) goto exploded;
+            if (BOMB_DEAD()) goto exploded;
             sleep_ms(10);
         }
         simon_says_startup_animation();
-        while (!gpio_get(SS_BTN_RED)) sleep_ms(5);
+        while (!gpio_get(SS_BTN_RED)) {
+            if (BOMB_DEAD()) goto exploded;
+            sleep_ms(5);
+        }
 
         // ── ACTIVE: game is armed ────────────────────────────────────────────
         bool simon_done = false;
@@ -241,15 +288,15 @@ int main(void) {
         cd_display2("                ");
         simon_says_demo(6);
 
-        if (countdown_secs <= 0) goto exploded;
+        if (BOMB_DEAD()) goto exploded;
 
         cd_display1("Your turn!      ");
         cd_display2("Repeat sequence ");
 
         if (!simon_says_collect_input(6)) {
-            if (countdown_secs <= 0) goto exploded;
-            strike_count++;
-            update_strike_leds();
+            if (BOMB_DEAD()) goto exploded;
+            register_strike("SIMON");
+            if (BOMB_DEAD()) goto exploded;
             cd_display1("Wrong! Strike!  ");
             snprintf(strike_line, sizeof(strike_line), "Strikes: %d      ", strike_count);
             cd_display2(strike_line);
@@ -258,7 +305,7 @@ int main(void) {
             continue;
         }
 
-        if (countdown_secs <= 0) goto exploded;
+        if (BOMB_DEAD()) goto exploded;
 
         cd_display1("Correct!        ");
         cd_display2("Round 1 cleared!");
@@ -276,12 +323,18 @@ int main(void) {
         cd_display2("Press when ready");
 
         while (gpio_get(SS_BTN_RED) && gpio_get(SS_BTN_GREEN) &&
-               gpio_get(SS_BTN_BLUE) && gpio_get(SS_BTN_YELLOW)) sleep_ms(1);
+               gpio_get(SS_BTN_BLUE) && gpio_get(SS_BTN_YELLOW)) {
+            if (BOMB_DEAD()) goto exploded;
+            sleep_ms(1);
+        }
         while (!gpio_get(SS_BTN_RED) || !gpio_get(SS_BTN_GREEN) ||
-               !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) sleep_ms(10);
+               !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) {
+            if (BOMB_DEAD()) goto exploded;
+            sleep_ms(10);
+        }
         sleep_ms(300);
 
-        if (countdown_secs <= 0) goto exploded;
+        if (BOMB_DEAD()) goto exploded;
 
         simon_says_generate(6);
 
@@ -296,34 +349,34 @@ int main(void) {
         cd_display2("Press mapped btn");
 
         if (!simon_says_color_round(6)) {
-            if (countdown_secs <= 0) goto exploded;
+            if (BOMB_DEAD()) goto exploded;
+            register_strike("SIMON");
+            if (BOMB_DEAD()) goto exploded;
             cd_display1("Wrong! Strike!  ");
             snprintf(strike_line, sizeof(strike_line), "Strikes: %d      ", strike_count);
-            strike_count++;
-            update_strike_leds();
             cd_display2(strike_line);
             ss_strike_flash();
             sleep_ms(1500);
             continue;
         }
 
-        if (countdown_secs <= 0) goto exploded;
+        if (BOMB_DEAD()) goto exploded;
         simon_done = true;
 
-        // ── Both Simon Says rounds passed — check button module ───────────────
-        if (module_complete) goto defused;
+        // ── Simon done — wait for button + KRISH + MYLES ──────────────────────
+        if (module_complete && krish_solved && myles_solved) goto defused;
 
         cd_display1("Simon: DONE!    ");
-        cd_display2("Waiting button..");
+        cd_display2("Waiting others..");
 
-        while (!module_complete) {
-            if (countdown_secs <= 0) goto exploded;
+        while (!(module_complete && krish_solved && myles_solved)) {
+            if (BOMB_DEAD()) goto exploded;
             sleep_ms(10);
         }
 
         defused:
         cd_display1("** DEFUSED! **  ");
-        cd_display2("Both modules OK!");
+        cd_display2("All modules OK! ");
         gpio_put(SS_LED_RED, 1); gpio_put(SS_LED_GREEN, 1);
         gpio_put(SS_LED_BLUE, 1); gpio_put(SS_LED_YELLOW, 1);
         timer_active = false;

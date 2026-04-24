@@ -17,6 +17,6 @@ int16_t wave_clamp_y(int16_t y);
 void wave_draw_target(const int16_t *y_coords);
 
 // Render player wave (erase old, draw new)
-void wave_draw_player(const int16_t *old_y, const int16_t *new_y);
+void wave_draw_player(const int16_t *old_y, const int16_t *new_y, const int16_t *target_y);
 
 #endif // WAVES_H

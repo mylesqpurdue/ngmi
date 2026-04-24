@@ -3,6 +3,10 @@
 #include "hardware/gpio.h"
 #include <string.h>
 
+extern volatile int strike_count;
+extern int countdown_secs;
+#define BOMB_DEAD() (countdown_secs <= 0 || strike_count >= 3)
+
 static uint8_t s_demo_sequence[8];
 static int     s_demo_length    = 0;
 static uint8_t s_user_input[8];
@@ -83,14 +87,21 @@ bool simon_says_collect_input(int length) {
     int step = 0;
 
     while (!gpio_get(SS_BTN_RED) || !gpio_get(SS_BTN_GREEN) ||
-           !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) sleep_ms(10);
+           !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) {
+        if (BOMB_DEAD()) return false;
+        sleep_ms(10);
+    }
     sleep_ms(100);
 
     while (step < length) {
+        if (BOMB_DEAD()) return false;
 
         if (!gpio_get(SS_BTN_RED)) {
             gpio_put(SS_LED_RED, 1);
-            while (!gpio_get(SS_BTN_RED)) sleep_ms(5);
+            while (!gpio_get(SS_BTN_RED)) {
+                if (BOMB_DEAD()) return false;
+                sleep_ms(5);
+            }
             gpio_put(SS_LED_RED, 0);
             if (s_demo_sequence[step] != 1) return false;
             step++;
@@ -98,7 +109,10 @@ bool simon_says_collect_input(int length) {
 
         } else if (!gpio_get(SS_BTN_GREEN)) {
             gpio_put(SS_LED_GREEN, 1);
-            while (!gpio_get(SS_BTN_GREEN)) sleep_ms(5);
+            while (!gpio_get(SS_BTN_GREEN)) {
+                if (BOMB_DEAD()) return false;
+                sleep_ms(5);
+            }
             gpio_put(SS_LED_GREEN, 0);
             if (s_demo_sequence[step] != 2) return false;
             step++;
@@ -106,7 +120,10 @@ bool simon_says_collect_input(int length) {
 
         } else if (!gpio_get(SS_BTN_BLUE)) {
             gpio_put(SS_LED_BLUE, 1);
-            while (!gpio_get(SS_BTN_BLUE)) sleep_ms(5);
+            while (!gpio_get(SS_BTN_BLUE)) {
+                if (BOMB_DEAD()) return false;
+                sleep_ms(5);
+            }
             gpio_put(SS_LED_BLUE, 0);
             if (s_demo_sequence[step] != 3) return false;
             step++;
@@ -114,11 +131,16 @@ bool simon_says_collect_input(int length) {
 
         } else if (!gpio_get(SS_BTN_YELLOW)) {
             gpio_put(SS_LED_YELLOW, 1);
-            while (!gpio_get(SS_BTN_YELLOW)) sleep_ms(5);
+            while (!gpio_get(SS_BTN_YELLOW)) {
+                if (BOMB_DEAD()) return false;
+                sleep_ms(5);
+            }
             gpio_put(SS_LED_YELLOW, 0);
             if (s_demo_sequence[step] != 4) return false;
             step++;
             sleep_ms(80);
+        } else {
+            sleep_ms(5);
         }
     }
     return true;
@@ -140,7 +162,10 @@ void simon_says_generate(int length) {
 
 bool simon_says_color_round(int length) {
     while (!gpio_get(SS_BTN_RED) || !gpio_get(SS_BTN_GREEN) ||
-           !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) sleep_ms(10);
+           !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) {
+        if (BOMB_DEAD()) return false;
+        sleep_ms(10);
+    }
     sleep_ms(100);
 
     for (int step = 0; step < length; step++) {
@@ -151,6 +176,7 @@ bool simon_says_color_round(int length) {
 
         uint8_t pressed = 0;
         while (!pressed) {
+            if (BOMB_DEAD()) return false;
             if      (!gpio_get(SS_BTN_RED))    pressed = 1;
             else if (!gpio_get(SS_BTN_GREEN))  pressed = 2;
             else if (!gpio_get(SS_BTN_BLUE))   pressed = 3;
@@ -161,7 +187,10 @@ bool simon_says_color_round(int length) {
         gpio_put(led_pin, 0);
 
         while (!gpio_get(SS_BTN_RED) || !gpio_get(SS_BTN_GREEN) ||
-               !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) sleep_ms(5);
+               !gpio_get(SS_BTN_BLUE) || !gpio_get(SS_BTN_YELLOW)) {
+            if (BOMB_DEAD()) return false;
+            sleep_ms(5);
+        }
 
         uint8_t expected = rule_map[s_serial_code][s_demo_sequence[step] - 1];
         if (pressed != expected) return false;

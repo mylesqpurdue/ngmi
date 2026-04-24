@@ -38,6 +38,9 @@
 #include "led.h"
 #include "game.h"
 
+// System reset pin from master board (GP17 over wire)
+#define SYS_RESET_PIN 7
+
 // Module contexts
 static bg_ctx_t bg;
 static game_ctx_t waves;
@@ -101,6 +104,11 @@ int main(void) {
     // Peer link (TX-only)
     link_init();
 
+    // Hardware reset pin from master
+    gpio_init(SYS_RESET_PIN);
+    gpio_set_dir(SYS_RESET_PIN, GPIO_IN);
+    gpio_pull_up(SYS_RESET_PIN);
+
     // Paint initial target wave
     wave_compute(target_y, waves.target.frequency,
                  waves.target.amplitude, PLOT_CENTER_Y, WAVE_WIDTH);
@@ -114,6 +122,29 @@ int main(void) {
     while (1) {
         uint64_t now_us = time_us_64();
         uint64_t now_ms = now_us / 1000;
+
+        // Check for global reset from master board (active low)
+        if (!gpio_get(SYS_RESET_PIN)) {
+            printf("[MAIN] Global reset triggered from master!\n");
+            
+            // Reset both modules
+            game_init(&waves);
+            prime_waves_idle();
+            bg_reset(&bg);
+            
+            // Repaint initial target wave
+            display_fill_rect(0, 0, TFT_WIDTH, PLOT_HEIGHT, COLOR_BLACK);
+            wave_compute(target_y, waves.target.frequency,
+                         waves.target.amplitude, PLOT_CENTER_Y, WAVE_WIDTH);
+            wave_draw_target(target_y);
+            for (int i = 0; i < WAVE_WIDTH; i++) prev_player_y[i] = PLOT_CENTER_Y;
+            
+            // Wait for button release so we don't spam reset
+            while (!gpio_get(SYS_RESET_PIN)) {
+                sleep_ms(10);
+            }
+            continue; // Skip the rest of the frame and start fresh
+        }
 
         // 1. Poll the button (non-blocking edge detector)
         bool button_edge = bg_button_poll(now_us);
@@ -149,6 +180,10 @@ int main(void) {
             } else if (waves_evt == 2) {
                 link_send_solved("MYLES");
                 printf("[MAIN] → master: $SOLVED:MYLES\n");
+
+                // Clear the plot area and show SOLVED
+                display_fill_rect(0, 0, 240, 160, 0x0000); // TFT_WIDTH, PLOT_HEIGHT, COLOR_BLACK
+                display_draw_string(50, 70, "MODULE SOLVED!", 0x07E0, 0x0000); // COLOR_GREEN
             }
 
             // Idle-state LED blink (Myles's manual-decoding signal color).
@@ -167,7 +202,7 @@ int main(void) {
 
             // Repaint target on new-round transitions
             if (waves.state == WAVE_IDLE &&
-                (old_state == WAVE_RESET || old_state == WAVE_WIN)) {
+                (old_state == WAVE_RESET || old_state == WAVE_WIN || old_state == WAVE_FLASH_WHITE)) {
                 wave_compute(target_y, waves.target.frequency,
                              waves.target.amplitude, PLOT_CENTER_Y, WAVE_WIDTH);
                 display_fill_rect(0, 0, TFT_WIDTH, PLOT_HEIGHT, COLOR_BLACK);
@@ -179,7 +214,7 @@ int main(void) {
             if (waves.state == WAVE_WAIT || waves.state == WAVE_PLAYING) {
                 memcpy(prev_player_y, player_y, sizeof(player_y));
                 wave_compute(player_y, freq, amp, PLOT_CENTER_Y, WAVE_WIDTH);
-                wave_draw_player(prev_player_y, player_y);
+                wave_draw_player(prev_player_y, player_y, target_y);
             }
         }
 

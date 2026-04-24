@@ -11,7 +11,9 @@ typedef enum {
     WAVE_WIN, // Brief win flash between rounds
     WAVE_RESET, // Generate new target, back to IDLE
     WAVE_WAIT, // Solved enough -> wait without oversolving to complete
-    WAVE_COMPLETE // Module fully solved
+    WAVE_COMPLETE, // Module fully solved
+    WAVE_FLASH_STRIKE, // Async state for red strike flash
+    WAVE_FLASH_WHITE   // Async state for white reset flash
 } wave_state_t;
 
 // Match tolerance constants
@@ -42,6 +44,9 @@ typedef struct {
     uint64_t win_start_ms;
     uint64_t play_start_us;
     uint64_t wait_start_us; // When WAIT state began
+    uint64_t flash_start_us;
+    uint32_t flash_duration_us;
+    wave_state_t pending_state;
     bool freq_matched;
     bool amp_matched;
 

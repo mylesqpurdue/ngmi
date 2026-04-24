@@ -26,9 +26,13 @@ void wave_draw_target(const int16_t *y_coords) {
     }
 }
 
-void wave_draw_player(const int16_t *old_y, const int16_t *new_y) {
+void wave_draw_player(const int16_t *old_y, const int16_t *new_y, const int16_t *target_y) {
     for (int x = 0; x < WAVE_WIDTH; x++) {
-        display_draw_pixel(x, old_y[x], COLOR_BLACK);
+        if (old_y[x] == target_y[x]) {
+            display_draw_pixel(x, old_y[x], COLOR_LGRAY);
+        } else {
+            display_draw_pixel(x, old_y[x], COLOR_BLACK);
+        }
         display_draw_pixel(x, new_y[x], COLOR_GREEN);
     }
 }
